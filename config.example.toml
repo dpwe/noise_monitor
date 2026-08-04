@@ -1,0 +1,60 @@
+# Copy to config.toml and edit. Every key is optional -- anything you leave out
+# keeps its default. Run with:  noise-monitor run -c config.toml
+
+[audio]
+# Substring of the input device name, or a numeric index. `noise-monitor
+# devices` lists what is connected.
+device = "UMIK"
+samplerate = 48000
+blocksize = 1024
+channel = 0
+# A block with any sample at or above this is flagged as clipped.
+clip_threshold_dbfs = -0.5
+
+[calibration]
+# The serial-numbered .txt from miniDSP. The _90deg variant is the better
+# choice for a mic pointing up at a diffuse field; the plain one is for a mic
+# aimed at the source.
+cal_file = "~/noise_monitor/cal/7005701.txt"
+
+apply_frequency_correction = true
+# Also correct the signal feeding the dB(A) meter, not just the spectrogram.
+correct_broadband = true
+fir_taps = 1023
+max_boost_db = 12.0
+
+# How far the capture gain sits BELOW the cal file's reference (maximum).
+# `noise-monitor gain` works this out from ALSA on Linux. 0 means the capture
+# gain is at maximum, which is the reference condition -- and the setting with
+# the least headroom. See the README.
+input_gain_db = 0.0
+
+# Measured with an acoustic calibrator via `noise-monitor calibrate`. When set,
+# this overrides everything above and is the most trustworthy option.
+# spl_offset_db = 94.62
+
+[analysis]
+nfft = 4096          # 4096 @ 48 kHz = 11.7 Hz bins, 85 ms window
+hop = 1024           # 21 ms between spectrogram columns
+fmin = 20.0
+fmax = 20000.0
+n_bands = 256        # spectrogram rows, log-spaced between fmin and fmax
+scale = "band"       # "band" = level per band, "density" = level per Hz
+weighting = "A"      # headline number: "A", "C" or "Z"
+spectrogram_weighting = "Z"   # leave the spectrogram itself unweighted
+time_weighting = "fast"       # "fast" (125 ms) or "slow" (1 s)
+
+[logging]
+enabled = true
+directory = "logs"
+interval_s = 10.0    # one CSV row per interval
+rotate_daily = true
+
+[ui]
+history_s = 30.0         # seconds of spectrogram on screen
+level_history_s = 300.0  # seconds in the level trace below it
+db_min = 0.0             # colour scale, in dB SPL
+db_max = 90.0
+colormap = "viridis"
+refresh_hz = 30.0
+fullscreen = false
