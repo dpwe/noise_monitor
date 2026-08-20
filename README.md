@@ -163,14 +163,16 @@ Two spectrograms, half the window each:
 | Live | `ui.history_s` (30 s) | One column per FFT hop, ~21 ms. |
 | Long-term average | `ui.long_span_s` (24 h) | One column per `ui.long_column_s` (3 min), with the LAeq over the same windows drawn on top in red. |
 
-The current level, and the statistics from the last logged interval, are drawn
-*over* the live panel rather than in a strip above it — the spectrograms get
-the whole window.
+The current level is drawn *over* the live panel, small, rather than in a strip
+above it — the spectrograms get the whole window. Everything else lives in the
+CSV. Dropped blocks and xruns, which mean the log is missing sound, appear in
+the status line at the bottom.
 
-The readout is a **rolling Leq over `analysis.display_average_s`** (1 s by
+The readout is a **rolling Leq over `analysis.display_average_s`** (5 s by
 default), not the exponential Fast level — steady enough to read off a screen
-across the room. Fast/Slow is still what `LAmax` and the percentiles in the CSV
-are measured from, per IEC 61672.
+across the room. Fast/Slow is still what `LAmax`, the percentiles in the CSV
+and the long-term panel are measured from, per IEC 61672; how smooth you like
+the readout has no effect on anything that gets recorded.
 
 The red trace uses `ui.level_min`..`ui.level_max` (30–60 dB), which is where
 residential background noise lives; the spectrograms keep the wider
@@ -189,7 +191,7 @@ noise-monitor run --synthetic                 # no microphone needed
 noise-monitor run --weighting C --time-weighting slow
 noise-monitor run --fullscreen --history 60
 noise-monitor run --long-span 12 --long-column 1    # 12 h panel, 1 min columns
-noise-monitor run --average 5                       # steadier readout
+noise-monitor run --average 1                       # livelier readout
 noise-monitor run --headless 3600             # log for an hour, no GUI
 noise-monitor devices                         # list inputs
 ```

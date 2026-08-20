@@ -82,7 +82,7 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--history", type=float, help="seconds of spectrogram on screen")
     p.add_argument(
         "--average", type=float, metavar="SECONDS",
-        help="averaging window for the level readout and traces (default 1)",
+        help="averaging window for the level readout (default 5)",
     )
     p.add_argument(
         "--long-column", type=float, metavar="MINUTES",

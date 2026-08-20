@@ -63,10 +63,10 @@ class AnalysisConfig:
     spectrogram_weighting: str = "Z"
     #: Exponential time weighting for the level statistics: "fast" or "slow".
     time_weighting: str = "fast"
-    #: Window of the rolling Leq shown as the live readout and level trace.
-    #: The exponential (fast/slow) level is jumpy to read; this is the average
-    #: level over the last `display_average_s` seconds instead.
-    display_average_s: float = 1.0
+    #: Window of the rolling Leq shown as the live readout. The exponential
+    #: (fast/slow) level is jumpy to read; this is the average level over the
+    #: last `display_average_s` seconds instead.
+    display_average_s: float = 5.0
 
 
 @dataclass

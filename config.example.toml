@@ -43,7 +43,7 @@ scale = "band"       # "band" = level per band, "density" = level per Hz
 weighting = "A"      # headline number: "A", "C" or "Z"
 spectrogram_weighting = "Z"   # leave the spectrogram itself unweighted
 time_weighting = "fast"       # "fast" (125 ms) or "slow" (1 s)
-display_average_s = 1.0       # readout and traces show the Leq over this window
+display_average_s = 5.0       # the readout shows the Leq over this window
 
 [logging]
 enabled = true

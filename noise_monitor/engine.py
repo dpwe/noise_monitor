@@ -159,7 +159,11 @@ class MonitorEngine:
                 with self._lock:
                     self._columns.extend(frame.columns)
                     for column in frame.columns:
-                        self._long_term.add(column, frame.leq_avg)
+                        # The time-weighted level, not the display average: how
+                        # smooth someone likes the readout must not change what
+                        # the day-long history records. Power-averaging over a
+                        # column swamps the 125 ms detector either way.
+                        self._long_term.add(column, frame.level_db)
                     self._state.level_db = frame.level_db
                     self._state.leq_avg = frame.leq_avg
                     self._state.clipped = frame.clipped

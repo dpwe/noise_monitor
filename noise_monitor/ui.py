@@ -117,6 +117,8 @@ class MonitorWindow(QtWidgets.QMainWindow):
     ROW_STRETCH = (1, 1)
     #: Gap between the overlaid readout and the edge of the live image.
     OVERLAY_MARGIN_PX = 10
+    #: Point sizes in the overlaid readout: number, unit, averaging note.
+    READOUT_POINT_SIZES = (22, 8, 7)
 
     def __init__(self, engine: MonitorEngine, config: Config):
         super().__init__()
@@ -129,7 +131,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.n_bands = config.analysis.n_bands
         self.unit = "dB SPL" if engine.calibrated else "dBFS"
         self._level_number = ""
-        self._stats_text = ""
+        self._status_extra = ""
         self.weighting = config.analysis.weighting.upper()
 
         # image[time, freq] with col-major image order.
@@ -275,11 +277,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.level_label = self._overlay_label()
         self._set_level_text("--.-")
 
-        self.stats_label = self._overlay_label(family="monospace", point_size=13)
-        self.stats_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        self.stats_label.setVisible(False)
-
-        self.clip_label = self._overlay_label(point_size=15, color="#ff5252")
+        self.clip_label = self._overlay_label(point_size=10, color="#ff5252")
         self.clip_label.setText("CLIP")
         self.clip_label.setVisible(False)
 
@@ -289,6 +287,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self._place_overlay()
 
     def _set_level_text(self, number: str) -> None:
+        big, small, tiny = self.READOUT_POINT_SIZES
         suffix = f"dB{self.weighting}"
         if not self.engine.calibrated:
             # Uncalibrated, the number is a full-scale ratio, not a pressure.
@@ -296,12 +295,12 @@ class MonitorWindow(QtWidgets.QMainWindow):
         note = ""
         if self.engine.average_s > 0:
             note = (
-                f'<br><span style="font-size:11pt; color:#cfcfcf">'
+                f'<br><span style="font-size:{tiny}pt; color:#cfcfcf">'
                 f"{_duration_label(self.engine.average_s)} average</span>"
             )
         self.level_label.setText(
-            f'<span style="font-size:44pt; font-weight:bold">{number}</span>'
-            f'<span style="font-size:15pt">&nbsp;{suffix}</span>{note}'
+            f'<span style="font-size:{big}pt; font-weight:bold">{number}</span>'
+            f'<span style="font-size:{small}pt">&nbsp;{suffix}</span>{note}'
         )
 
     def _overlay_label(
@@ -318,7 +317,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
             label.setFont(font)
         label.setStyleSheet(
             f"color: {color}; background-color: rgba(0, 0, 0, 120);"
-            "border-radius: 4px; padding: 2px 8px;"
+            "border-radius: 3px; padding: 1px 5px;"
         )
         label.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         label.raise_()
@@ -330,11 +329,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
         margin = self.OVERLAY_MARGIN_PX
         left, top = area.left() + margin, area.top() + margin
 
-        for label in (self.level_label, self.stats_label, self.clip_label):
+        for label in (self.level_label, self.clip_label):
             label.adjustSize()
         self.level_label.move(left, top)
         self.clip_label.move(left, top + self.level_label.height() + 4)
-        self.stats_label.move(area.right() - self.stats_label.width() - margin, top)
 
     def _build_status(self) -> QtWidgets.QLabel:
         self.status_label = QtWidgets.QLabel()
@@ -344,6 +342,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         if not self.engine.calibrated:
             text += "  |  showing dBFS, NOT absolute SPL"
             self.status_label.setStyleSheet("color: #b06000; font-weight: bold;")
+        self._status_text = text
         self.status_label.setText(text)
         return self.status_label
 
@@ -387,7 +386,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
                 self._place_overlay()  # the box grows and shrinks with the digits
 
         self.clip_label.setVisible(state.clip_hold)
-        self._update_stats(state)
+        self._update_status(state)
 
         if state.error:
             self.status_label.setText(f"ERROR: {state.error}")
@@ -405,22 +404,18 @@ class MonitorWindow(QtWidgets.QMainWindow):
             hours_ago = snapshot.ages_s() / 3600.0
             self.long_level_curve.setData(-hours_ago, snapshot.levels[-snapshot.n_valid :])
 
-    def _update_stats(self, state) -> None:
-        w = self.weighting
-        lines = []
-        iv = state.last_interval
-        if iv is not None:
-            lines.append(f"L{w}eq,{iv.duration_s:g}s {iv.leq:6.1f}")
-            lines.append(f"L{w}max    {iv.lmax:6.1f}")
-            lines.append(f"L{w}90     {iv.l90:6.1f}")
+    def _update_status(self, state) -> None:
+        """Keep lost audio visible somewhere now that the stats overlay is gone.
+
+        Dropped blocks and xruns mean the log is missing sound, which is worth
+        knowing about; it goes in the status line rather than over the image.
+        """
+        extra = ""
         if state.dropped_blocks or state.overflows:
-            lines.append(f"dropped {state.dropped_blocks} / xrun {state.overflows}")
-        text = "\n".join(lines)
-        if text != self._stats_text:
-            self._stats_text = text
-            self.stats_label.setText(text)
-            self.stats_label.setVisible(bool(text))
-            self._place_overlay()  # right-anchored, so its width matters
+            extra = f"  |  dropped {state.dropped_blocks} / xrun {state.overflows}"
+        if extra != self._status_extra:
+            self._status_extra = extra
+            self.status_label.setText(self._status_text + extra)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
