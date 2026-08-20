@@ -80,10 +80,8 @@ class LoggingConfig:
 
 @dataclass
 class UIConfig:
-    #: Seconds of spectrogram history on screen.
+    #: Seconds of live spectrogram on screen.
     history_s: float = 30.0
-    #: Seconds of level history in the bottom trace.
-    level_history_s: float = 300.0
     #: Seconds of audio averaged into one column of the long-term panel.
     long_column_s: float = 180.0
     #: Total time span of the long-term panel.

@@ -156,23 +156,26 @@ it whenever you change the capture gain.
 noise-monitor run -c config.toml
 ```
 
-Three panels, top to bottom:
+Two spectrograms, half the window each:
 
 | Panel | Span | Shows |
 |---|---|---|
-| Live spectrogram | `ui.history_s` (30 s) | One column per FFT hop, ~21 ms. |
-| Level trace | `ui.level_history_s` (5 min) | The rolling LAeq the big readout shows. |
+| Live | `ui.history_s` (30 s) | One column per FFT hop, ~21 ms. |
 | Long-term average | `ui.long_span_s` (24 h) | One column per `ui.long_column_s` (3 min), with the LAeq over the same windows drawn on top in red. |
 
-The big readout and both traces are a **rolling Leq over
-`analysis.display_average_s`** (1 s by default), not the exponential Fast level
-— steady enough to read off a screen across the room. Fast/Slow is still what
-`LAmax` and the percentiles in the CSV are measured from, per IEC 61672.
+The current level, and the statistics from the last logged interval, are drawn
+*over* the live panel rather than in a strip above it — the spectrograms get
+the whole window.
 
-Both traces use `ui.level_min`..`ui.level_max` (30–60 dB), which is where
+The readout is a **rolling Leq over `analysis.display_average_s`** (1 s by
+default), not the exponential Fast level — steady enough to read off a screen
+across the room. Fast/Slow is still what `LAmax` and the percentiles in the CSV
+are measured from, per IEC 61672.
+
+The red trace uses `ui.level_min`..`ui.level_max` (30–60 dB), which is where
 residential background noise lives; the spectrograms keep the wider
-`db_min`..`db_max` colour scale. Widen the traces if you are measuring
-something louder.
+`db_min`..`db_max` colour scale, and share one colour bar. Widen the trace if
+you are measuring something louder.
 
 | Key | Action |
 |---|---|

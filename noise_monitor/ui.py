@@ -1,13 +1,15 @@
-"""PyQtGraph front end: two spectrograms, a big dB(A) readout and level traces.
+"""PyQtGraph front end: two spectrograms, one live and one averaged over a day.
 
-The top panel is live -- tens of seconds, one column per FFT hop. The bottom
-one covers the past day at one column per `ui.long_column_s`, with the dB(A)
-Leq over the same windows drawn on top of it. Both are fixed-size images
-scrolled in place rather than growing arrays, so memory and redraw cost stay
-constant however long the run is.
+They get half the window each. The top panel is live -- tens of seconds, one
+column per FFT hop. The bottom one covers the past day at one column per
+`ui.long_column_s`, with the dB(A) Leq over the same windows drawn on top of
+it. Both are fixed-size images scrolled in place rather than growing arrays, so
+memory and redraw cost stay constant however long the run is.
 
-Rows are log-spaced in frequency, which makes the images' own y-axis linear in
-"band index"; the axis labels are remapped to the real frequencies.
+The readout and the statistics are drawn *over* the live panel rather than in a
+strip above it, so nothing is spent on background. Rows are log-spaced in
+frequency, which makes the images' own y-axis linear in "band index"; the axis
+labels are remapped to the real frequencies.
 """
 
 from __future__ import annotations
@@ -111,9 +113,10 @@ def _grid_levels(low: float, high: float, step: float = 10.0) -> list[float]:
 
 
 class MonitorWindow(QtWidgets.QMainWindow):
-    #: Relative heights of the three panels: live spectrogram, live level
-    #: trace, day-long average.
-    ROW_STRETCH = (2, 1, 3)
+    #: Relative heights of the two panels: live spectrogram, day-long average.
+    ROW_STRETCH = (1, 1)
+    #: Gap between the overlaid readout and the edge of the live image.
+    OVERLAY_MARGIN_PX = 10
 
     def __init__(self, engine: MonitorEngine, config: Config):
         super().__init__()
@@ -125,10 +128,9 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.n_cols = max(64, int(ui.history_s * hops_per_s))
         self.n_bands = config.analysis.n_bands
         self.unit = "dB SPL" if engine.calibrated else "dBFS"
-        # Both traces show a rolling Leq, not the exponential level, so name
-        # them for the window they actually average over.
+        self._level_number = ""
+        self._stats_text = ""
         self.weighting = config.analysis.weighting.upper()
-        self.level_name = f"L{self.weighting}eq,{_duration_label(engine.average_s)}"
 
         # image[time, freq] with col-major image order.
         self.image_data = np.full((self.n_cols, self.n_bands), ui.db_min, dtype=np.float32)
@@ -146,18 +148,15 @@ class MonitorWindow(QtWidgets.QMainWindow):
         layout.setSpacing(6)
         self.setCentralWidget(central)
 
-        layout.addLayout(self._build_header())
-
         self.glw = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.glw, stretch=3)
+        layout.addWidget(self.glw, stretch=1)
 
         self._build_live_spectrogram()
-        self._build_level_trace()
         self._build_long_term()
-        # The live view is the busiest and the least informative per pixel, so
-        # the day-long average gets the most height of the three.
+        self._build_colorbar()
         for row, stretch in enumerate(self.ROW_STRETCH):
             self.glw.ci.layout.setRowStretchFactor(row, stretch)
+        self._build_overlay()
 
         layout.addWidget(self._build_status())
 
@@ -167,7 +166,6 @@ class MonitorWindow(QtWidgets.QMainWindow):
             self.resize(1200, 900)
 
     def _build_live_spectrogram(self) -> None:
-        ui = self.config.ui
         self.spec_plot = self.glw.addPlot(
             row=0, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
         )
@@ -184,24 +182,21 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.spec_plot.setXRange(-seconds, 0, padding=0)
         self.spec_plot.setYRange(0, self.n_bands, padding=0)
 
-        # One colour bar for both spectrograms: they share a scale, and a
-        # second copy would only cost height.
-        colormap = pg.colormap.get(ui.colormap)
-        self.bar = pg.ColorBarItem(
-            values=(ui.db_min, ui.db_max), colorMap=colormap, label=f"Band {self.unit}"
-        )
-        self.bar.setImageItem(self.image, insert_in=self.spec_plot)
+    def _build_colorbar(self) -> None:
+        """One colour bar spanning both rows, driving both images.
 
-    def _build_level_trace(self) -> None:
+        Sharing it keeps the two plots the same width -- a bar on one row only
+        would push that panel in and misalign the two time axes -- and makes it
+        obvious that the panels are on the same scale.
+        """
         ui = self.config.ui
-        self.level_plot = self.glw.addPlot(row=1, col=0)
-        self.level_plot.setLabel("left", self.level_name, units=self.unit)
-        self.level_plot.setLabel("bottom", "Time", units="s")
-        self.level_plot.showGrid(x=True, y=True, alpha=0.3)
-        self.level_plot.setMouseEnabled(x=False, y=True)
-        self.level_plot.setYRange(ui.level_min, ui.level_max, padding=0)
-        self.level_plot.setXRange(-ui.level_history_s, 0, padding=0)
-        self.level_curve = self.level_plot.plot(pen=pg.mkPen("#4fc3f7", width=1))
+        self.bar = pg.ColorBarItem(
+            values=(ui.db_min, ui.db_max),
+            colorMap=pg.colormap.get(ui.colormap),
+            label=f"Band {self.unit}",
+        )
+        self.bar.setImageItem([self.image, self.long_image])
+        self.glw.addItem(self.bar, row=0, col=1, rowspan=len(self.ROW_STRETCH))
 
     def _build_long_term(self) -> None:
         """The day-long panel: an averaged spectrogram with the Leq on top.
@@ -215,7 +210,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         snapshot = self.engine.long_term()
 
         plot = self.glw.addPlot(
-            row=2, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
+            row=1, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
         )
         self.long_plot = plot
         plot.setLabel("left", "Frequency", units="Hz")
@@ -227,8 +222,6 @@ class MonitorWindow(QtWidgets.QMainWindow):
         plot.hideButtons()
 
         self.long_image = pg.ImageItem(snapshot.image)
-        self.long_image.setColorMap(pg.colormap.get(ui.colormap))
-        self.long_image.setLevels((ui.db_min, ui.db_max))
         plot.addItem(self.long_image)
         hours = snapshot.span_s / 3600.0
         self.long_image.setRect(QtCore.QRectF(-hours, 0, hours, self.n_bands))
@@ -269,51 +262,79 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.long_level_vb.setGeometry(self.long_plot.vb.sceneBoundingRect())
         self.long_level_vb.linkedViewChanged(self.long_plot.vb, self.long_level_vb.XAxis)
 
-    def _build_header(self) -> QtWidgets.QHBoxLayout:
-        row = QtWidgets.QHBoxLayout()
+    def _build_overlay(self) -> None:
+        """The readout, drawn over the live spectrogram instead of above it.
 
-        self.level_label = QtWidgets.QLabel("--.-")
-        font = QtGui.QFont()
-        font.setPointSize(44)
-        font.setBold(True)
-        self.level_label.setFont(font)
-        self.level_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(self.level_label)
+        Plain QLabels parented to the graphics widget, not TextItems: a
+        TextItem is laid out in scene units and would change size with the
+        view, and these need to stay put at a fixed point size. Each carries a
+        translucent backing so it stays legible over a bright band.
+        """
+        # Number and unit share one label -- and so one backing box -- because
+        # rich text lines them up on a baseline better than two boxes can.
+        self.level_label = self._overlay_label()
+        self._set_level_text("--.-")
 
-        weighting = self.config.analysis.weighting.upper()
-        # Uncalibrated, the number is a full-scale ratio, not a sound pressure.
-        suffix = f"dB{weighting}" if self.engine.calibrated else f"dBFS({weighting})"
-        if self.engine.average_s > 0:
-            suffix += f"\n{self.engine.average_s:g} s avg"
-        self.unit_label = QtWidgets.QLabel(suffix)
-        unit_font = QtGui.QFont()
-        unit_font.setPointSize(16)
-        self.unit_label.setFont(unit_font)
-        self.unit_label.setAlignment(
-            QtCore.Qt.AlignmentFlag.AlignBottom | QtCore.Qt.AlignmentFlag.AlignLeft
-        )
-        row.addWidget(self.unit_label)
-        row.addStretch(1)
+        self.stats_label = self._overlay_label(family="monospace", point_size=13)
+        self.stats_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
+        self.stats_label.setVisible(False)
 
-        self.stats_label = QtWidgets.QLabel("")
-        stats_font = QtGui.QFont()
-        stats_font.setPointSize(13)
-        stats_font.setFamily("monospace")
-        self.stats_label.setFont(stats_font)
-        self.stats_label.setAlignment(
-            QtCore.Qt.AlignmentFlag.AlignRight | QtCore.Qt.AlignmentFlag.AlignVCenter
-        )
-        row.addWidget(self.stats_label)
-
-        self.clip_label = QtWidgets.QLabel("CLIP")
-        clip_font = QtGui.QFont()
-        clip_font.setPointSize(16)
-        clip_font.setBold(True)
-        self.clip_label.setFont(clip_font)
-        self.clip_label.setStyleSheet("color: #b00020;")
+        self.clip_label = self._overlay_label(point_size=15, color="#ff5252")
+        self.clip_label.setText("CLIP")
         self.clip_label.setVisible(False)
-        row.addWidget(self.clip_label)
-        return row
+
+        # Follow the image, not the window: the plot area moves when the axis
+        # labels change width.
+        self.spec_plot.vb.sigResized.connect(self._place_overlay)
+        self._place_overlay()
+
+    def _set_level_text(self, number: str) -> None:
+        suffix = f"dB{self.weighting}"
+        if not self.engine.calibrated:
+            # Uncalibrated, the number is a full-scale ratio, not a pressure.
+            suffix = f"dBFS({self.weighting})"
+        note = ""
+        if self.engine.average_s > 0:
+            note = (
+                f'<br><span style="font-size:11pt; color:#cfcfcf">'
+                f"{_duration_label(self.engine.average_s)} average</span>"
+            )
+        self.level_label.setText(
+            f'<span style="font-size:44pt; font-weight:bold">{number}</span>'
+            f'<span style="font-size:15pt">&nbsp;{suffix}</span>{note}'
+        )
+
+    def _overlay_label(
+        self, point_size: int | None = None, family: str | None = None,
+        color: str = "#ffffff",
+    ) -> QtWidgets.QLabel:
+        label = QtWidgets.QLabel(self.glw)
+        if point_size is not None or family is not None:
+            font = QtGui.QFont()
+            if point_size is not None:
+                font.setPointSize(point_size)
+            if family is not None:
+                font.setFamily(family)
+            label.setFont(font)
+        label.setStyleSheet(
+            f"color: {color}; background-color: rgba(0, 0, 0, 120);"
+            "border-radius: 4px; padding: 2px 8px;"
+        )
+        label.setAttribute(QtCore.Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        label.raise_()
+        return label
+
+    def _place_overlay(self) -> None:
+        """Pin the overlay labels to the corners of the live image."""
+        area = self.glw.mapFromScene(self.spec_plot.vb.sceneBoundingRect()).boundingRect()
+        margin = self.OVERLAY_MARGIN_PX
+        left, top = area.left() + margin, area.top() + margin
+
+        for label in (self.level_label, self.stats_label, self.clip_label):
+            label.adjustSize()
+        self.level_label.move(left, top)
+        self.clip_label.move(left, top + self.level_label.height() + 4)
+        self.stats_label.move(area.right() - self.stats_label.width() - margin, top)
 
     def _build_status(self) -> QtWidgets.QLabel:
         self.status_label = QtWidgets.QLabel()
@@ -359,12 +380,11 @@ class MonitorWindow(QtWidgets.QMainWindow):
 
         level = state.leq_avg if np.isfinite(state.leq_avg) else state.level_db
         if np.isfinite(level):
-            self.level_label.setText(f"{level:.1f}")
-
-        if state.recent_levels:
-            times = np.array([t for t, _ in state.recent_levels])
-            levels = np.array([v for _, v in state.recent_levels])
-            self.level_curve.setData(times - times[-1], levels)
+            number = f"{level:.1f}"
+            if number != self._level_number:
+                self._level_number = number
+                self._set_level_text(number)
+                self._place_overlay()  # the box grows and shrinks with the digits
 
         self.clip_label.setVisible(state.clip_hold)
         self._update_stats(state)
@@ -395,7 +415,12 @@ class MonitorWindow(QtWidgets.QMainWindow):
             lines.append(f"L{w}90     {iv.l90:6.1f}")
         if state.dropped_blocks or state.overflows:
             lines.append(f"dropped {state.dropped_blocks} / xrun {state.overflows}")
-        self.stats_label.setText("\n".join(lines))
+        text = "\n".join(lines)
+        if text != self._stats_text:
+            self._stats_text = text
+            self.stats_label.setText(text)
+            self.stats_label.setVisible(bool(text))
+            self._place_overlay()  # right-anchored, so its width matters
 
     def keyPressEvent(self, event) -> None:
         key = event.key()

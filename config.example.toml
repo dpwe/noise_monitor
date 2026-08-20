@@ -53,15 +53,15 @@ rotate_daily = true
 
 [ui]
 history_s = 30.0         # seconds of live spectrogram on screen
-level_history_s = 300.0  # seconds in the level trace below it
 
-# The long-term panel underneath: one averaged column per long_column_s,
-# long_span_s / long_column_s columns across the width of the window.
+# The long-term panel underneath, which gets the other half of the window:
+# one averaged column per long_column_s, long_span_s / long_column_s columns
+# across the width of the window.
 long_column_s = 180.0    # 3 minutes of audio per column
 long_span_s = 86400.0    # 24 hours across the panel
 long_refresh_s = 1.0     # it moves slowly; no need to redraw it at refresh_hz
 
-level_min = 30.0         # dB range of both level traces
+level_min = 30.0         # dB range of the level trace over the long-term panel
 level_max = 60.0
 db_min = 0.0             # colour scale, in dB SPL
 db_max = 90.0

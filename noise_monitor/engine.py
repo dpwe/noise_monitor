@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -30,7 +30,6 @@ class EngineState:
     last_interval: IntervalStats | None = None
     running: bool = False
     error: str | None = None
-    recent_levels: list[tuple[float, float]] = field(default_factory=list)
 
 
 class MonitorEngine:
@@ -57,15 +56,11 @@ class MonitorEngine:
         hops_per_s = config.audio.samplerate / config.analysis.hop
         self._max_columns = int(config.ui.history_s * hops_per_s) + 64
         self._columns: deque[np.ndarray] = deque(maxlen=self._max_columns)
-        self._levels: deque[tuple[float, float]] = deque(
-            maxlen=int(config.ui.level_history_s * hops_per_s) + 64
-        )
         # The long-term panel is fed here rather than from drain(), so it keeps
         # accumulating whatever the UI does -- including not existing at all.
         self._long_term = LongTermAverage.from_config(config)
         self._state = EngineState()
         self._clip_hold_blocks = 0
-        self._elapsed = 0.0
 
     # ------------------------------------------------------------------
     @property
@@ -133,7 +128,6 @@ class MonitorEngine:
                 last_interval=self._state.last_interval,
                 running=self._state.running,
                 error=self._state.error,
-                recent_levels=list(self._levels),
             )
         return columns, state
 
@@ -151,7 +145,6 @@ class MonitorEngine:
                     self.analyzer.note_dropped_blocks(dropped)
 
                 frame = self.analyzer.process(block)
-                self._elapsed += block.size / self.analyzer.samplerate
 
                 intervals = self.analyzer.pop_intervals()
                 if self.logger is not None:
@@ -166,7 +159,6 @@ class MonitorEngine:
                 with self._lock:
                     self._columns.extend(frame.columns)
                     for column in frame.columns:
-                        self._levels.append((self._elapsed, frame.leq_avg))
                         self._long_term.add(column, frame.leq_avg)
                     self._state.level_db = frame.level_db
                     self._state.leq_avg = frame.leq_avg
