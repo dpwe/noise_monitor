@@ -54,7 +54,7 @@ def test_calibrator_tone_reads_94_db(cal_file):
     signal = sine(1000.0, 3.0, cfg.audio.samplerate, rms=target_rms)
     frames = run(analyzer, signal)
     assert frames[-1].level_db == pytest.approx(94.0, abs=0.1)
-    assert frames[-1].leq_1s == pytest.approx(94.0, abs=0.1)
+    assert frames[-1].leq_avg == pytest.approx(94.0, abs=0.1)
 
 
 def test_a_weighting_applies_to_the_headline_number(cal_file):
@@ -107,7 +107,7 @@ def test_band_levels_sum_to_the_broadband_level(cal_file):
 
     band_total = np.mean([10 ** (c / 10) for c in columns], axis=0).sum()
     band_db = 10 * np.log10(band_total)
-    assert band_db == pytest.approx(frames[-1].leq_1s, abs=0.5)
+    assert band_db == pytest.approx(frames[-1].leq_avg, abs=0.5)
 
 
 def test_spectrogram_column_shape_and_rate(cal_file):

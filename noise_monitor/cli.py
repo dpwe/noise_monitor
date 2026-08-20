@@ -80,6 +80,18 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
         "--time-weighting", choices=["fast", "slow"], help="exponential time weighting"
     )
     p.add_argument("--history", type=float, help="seconds of spectrogram on screen")
+    p.add_argument(
+        "--average", type=float, metavar="SECONDS",
+        help="averaging window for the level readout and traces (default 1)",
+    )
+    p.add_argument(
+        "--long-column", type=float, metavar="MINUTES",
+        help="minutes of audio per column of the long-term panel (default 3)",
+    )
+    p.add_argument(
+        "--long-span", type=float, metavar="HOURS",
+        help="hours covered by the long-term panel (default 24)",
+    )
     p.add_argument("--db-min", type=float, help="colour scale minimum")
     p.add_argument("--db-max", type=float, help="colour scale maximum")
     p.add_argument("--log-dir", type=Path, help="directory for CSV logs")
@@ -118,6 +130,12 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         cfg.analysis.time_weighting = args.time_weighting
     if a("history") is not None:
         cfg.ui.history_s = args.history
+    if a("average") is not None:
+        cfg.analysis.display_average_s = args.average
+    if a("long_column") is not None:
+        cfg.ui.long_column_s = args.long_column * 60.0
+    if a("long_span") is not None:
+        cfg.ui.long_span_s = args.long_span * 3600.0
     if a("db_min") is not None:
         cfg.ui.db_min = args.db_min
     if a("db_max") is not None:

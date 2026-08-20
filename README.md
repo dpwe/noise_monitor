@@ -156,6 +156,24 @@ it whenever you change the capture gain.
 noise-monitor run -c config.toml
 ```
 
+Three panels, top to bottom:
+
+| Panel | Span | Shows |
+|---|---|---|
+| Live spectrogram | `ui.history_s` (30 s) | One column per FFT hop, ~21 ms. |
+| Level trace | `ui.level_history_s` (5 min) | The rolling LAeq the big readout shows. |
+| Long-term average | `ui.long_span_s` (24 h) | One column per `ui.long_column_s` (3 min), with the LAeq over the same windows drawn on top in red. |
+
+The big readout and both traces are a **rolling Leq over
+`analysis.display_average_s`** (1 s by default), not the exponential Fast level
+— steady enough to read off a screen across the room. Fast/Slow is still what
+`LAmax` and the percentiles in the CSV are measured from, per IEC 61672.
+
+Both traces use `ui.level_min`..`ui.level_max` (30–60 dB), which is where
+residential background noise lives; the spectrograms keep the wider
+`db_min`..`db_max` colour scale. Widen the traces if you are measuring
+something louder.
+
 | Key | Action |
 |---|---|
 | `F` | Toggle fullscreen |
@@ -167,6 +185,8 @@ Useful flags (all override the config file):
 noise-monitor run --synthetic                 # no microphone needed
 noise-monitor run --weighting C --time-weighting slow
 noise-monitor run --fullscreen --history 60
+noise-monitor run --long-span 12 --long-column 1    # 12 h panel, 1 min columns
+noise-monitor run --average 5                       # steadier readout
 noise-monitor run --headless 3600             # log for an hour, no GUI
 noise-monitor devices                         # list inputs
 ```
@@ -273,6 +293,16 @@ narrower than one FFT bin, so they show a proportional share of it; raise
 `nfft` for more low-frequency resolution, at the cost of time resolution.
 `scale = "density"` divides by bandwidth and renders broadband noise flat.
 
+**Long-term average.** The bottom panel averages every `ui.long_column_s` of
+live columns into one, in the **power** domain. Averaging decibels instead
+would badly under-report a day shaped by short loud events: the mean of 40 and
+80 dB is 60 dB, but their energy mean — the thing a person actually hears the
+day as — is 77 dB. So each long-term column is a genuine per-band Leq, and the
+trace over it is the broadband Leq over the same window. It is stored as a
+fixed array scrolled in place, so 24 hours costs the same as 24 seconds
+(480 columns × 256 bands ≈ 0.5 MB), and the column still filling is shown at
+the right-hand edge so the newest minutes are not blank.
+
 ## Layout
 
 | File | |
@@ -282,6 +312,7 @@ narrower than one FFT bin, so they show a proportional share of it; raise
 | `spectrum.py` | Streaming STFT, bin→band mapping |
 | `metrics.py` | Leq / Lmax / Ln accumulation per interval |
 | `analysis.py` | The chain: blocks in, columns and levels out |
+| `longterm.py` | Power-domain averaging behind the 24 hour panel |
 | `capture.py` | PortAudio, plus synthetic and WAV sources |
 | `engine.py` | DSP thread, state snapshot for the GUI |
 | `ui.py` | PyQtGraph window |

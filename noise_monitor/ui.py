@@ -1,8 +1,12 @@
-"""PyQtGraph front end: scrolling spectrogram, big dB(A) readout, level history.
+"""PyQtGraph front end: two spectrograms, a big dB(A) readout and level traces.
 
-The spectrogram is a fixed-size image scrolled in place (np.roll on the column
-axis) rather than a growing array, so memory and redraw cost stay constant.
-Rows are log-spaced in frequency, which makes the image's own y-axis linear in
+The top panel is live -- tens of seconds, one column per FFT hop. The bottom
+one covers the past day at one column per `ui.long_column_s`, with the dB(A)
+Leq over the same windows drawn on top of it. Both are fixed-size images
+scrolled in place rather than growing arrays, so memory and redraw cost stay
+constant however long the run is.
+
+Rows are log-spaced in frequency, which makes the images' own y-axis linear in
 "band index"; the axis labels are remapped to the real frequencies.
 """
 
@@ -87,7 +91,30 @@ class LogFreqAxis(pg.AxisItem):
         return out
 
 
+def _duration_label(seconds: float) -> str:
+    """A compact name for an averaging window: '1s', '3min', '24h'.
+
+    Deliberately imprecise: a column is a whole number of FFT hops, so a
+    nominal 3 minutes is really 180.011 s, and nobody wants to read that.
+    """
+    if seconds >= 3600:
+        return f"{seconds / 3600:.3g}h"
+    if seconds >= 60:
+        return f"{seconds / 60:.3g}min"
+    return f"{seconds:.3g}s"
+
+
+def _grid_levels(low: float, high: float, step: float = 10.0) -> list[float]:
+    """Round dB values strictly inside (low, high), for the overlay's grid."""
+    first = np.ceil(low / step) * step
+    return [float(v) for v in np.arange(first, high, step) if low < v < high]
+
+
 class MonitorWindow(QtWidgets.QMainWindow):
+    #: Relative heights of the three panels: live spectrogram, live level
+    #: trace, day-long average.
+    ROW_STRETCH = (2, 1, 3)
+
     def __init__(self, engine: MonitorEngine, config: Config):
         super().__init__()
         self.engine = engine
@@ -98,6 +125,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.n_cols = max(64, int(ui.history_s * hops_per_s))
         self.n_bands = config.analysis.n_bands
         self.unit = "dB SPL" if engine.calibrated else "dBFS"
+        # Both traces show a rolling Leq, not the exponential level, so name
+        # them for the window they actually average over.
+        self.weighting = config.analysis.weighting.upper()
+        self.level_name = f"L{self.weighting}eq,{_duration_label(engine.average_s)}"
 
         # image[time, freq] with col-major image order.
         self.image_data = np.full((self.n_cols, self.n_bands), ui.db_min, dtype=np.float32)
@@ -117,10 +148,26 @@ class MonitorWindow(QtWidgets.QMainWindow):
 
         layout.addLayout(self._build_header())
 
-        # --- spectrogram --------------------------------------------------
         self.glw = pg.GraphicsLayoutWidget()
         layout.addWidget(self.glw, stretch=3)
 
+        self._build_live_spectrogram()
+        self._build_level_trace()
+        self._build_long_term()
+        # The live view is the busiest and the least informative per pixel, so
+        # the day-long average gets the most height of the three.
+        for row, stretch in enumerate(self.ROW_STRETCH):
+            self.glw.ci.layout.setRowStretchFactor(row, stretch)
+
+        layout.addWidget(self._build_status())
+
+        if ui.fullscreen:
+            self.showFullScreen()
+        else:
+            self.resize(1200, 900)
+
+    def _build_live_spectrogram(self) -> None:
+        ui = self.config.ui
         self.spec_plot = self.glw.addPlot(
             row=0, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
         )
@@ -137,37 +184,97 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.spec_plot.setXRange(-seconds, 0, padding=0)
         self.spec_plot.setYRange(0, self.n_bands, padding=0)
 
+        # One colour bar for both spectrograms: they share a scale, and a
+        # second copy would only cost height.
         colormap = pg.colormap.get(ui.colormap)
         self.bar = pg.ColorBarItem(
             values=(ui.db_min, ui.db_max), colorMap=colormap, label=f"Band {self.unit}"
         )
         self.bar.setImageItem(self.image, insert_in=self.spec_plot)
 
-        # --- level history -------------------------------------------------
+    def _build_level_trace(self) -> None:
+        ui = self.config.ui
         self.level_plot = self.glw.addPlot(row=1, col=0)
-        self.level_plot.setLabel("left", f"L{self.config.analysis.weighting}F", units=self.unit)
+        self.level_plot.setLabel("left", self.level_name, units=self.unit)
         self.level_plot.setLabel("bottom", "Time", units="s")
         self.level_plot.showGrid(x=True, y=True, alpha=0.3)
         self.level_plot.setMouseEnabled(x=False, y=True)
-        self.level_plot.setYRange(ui.db_min, ui.db_max, padding=0)
+        self.level_plot.setYRange(ui.level_min, ui.level_max, padding=0)
         self.level_plot.setXRange(-ui.level_history_s, 0, padding=0)
         self.level_curve = self.level_plot.plot(pen=pg.mkPen("#4fc3f7", width=1))
-        self.glw.ci.layout.setRowStretchFactor(0, 3)
-        self.glw.ci.layout.setRowStretchFactor(1, 1)
 
-        layout.addWidget(self._build_status())
+    def _build_long_term(self) -> None:
+        """The day-long panel: an averaged spectrogram with the Leq on top.
 
-        if ui.fullscreen:
-            self.showFullScreen()
-        else:
-            self.resize(1200, 800)
+        The level gets its own ViewBox rather than sharing the plot's, so it
+        can keep a narrow dB scale (`ui.level_min`..`level_max`) while the
+        image underneath keeps the 90 dB colour scale. The two are linked in x
+        and their geometries are kept in step by `_sync_long_overlay`.
+        """
+        ui = self.config.ui
+        snapshot = self.engine.long_term()
+
+        plot = self.glw.addPlot(
+            row=2, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
+        )
+        self.long_plot = plot
+        plot.setLabel("left", "Frequency", units="Hz")
+        # Hours are not an SI unit; without this the axis reads "mh" whenever
+        # the span is short enough for pyqtgraph to reach for a prefix.
+        plot.getAxis("bottom").enableAutoSIPrefix(False)
+        plot.setLabel("bottom", "Time (hours ago)")
+        plot.setMouseEnabled(x=False, y=False)
+        plot.hideButtons()
+
+        self.long_image = pg.ImageItem(snapshot.image)
+        self.long_image.setColorMap(pg.colormap.get(ui.colormap))
+        self.long_image.setLevels((ui.db_min, ui.db_max))
+        plot.addItem(self.long_image)
+        hours = snapshot.span_s / 3600.0
+        self.long_image.setRect(QtCore.QRectF(-hours, 0, hours, self.n_bands))
+        plot.setXRange(-hours, 0, padding=0)
+        plot.setYRange(0, self.n_bands, padding=0)
+
+        self.long_level_vb = pg.ViewBox(enableMouse=False)
+        # A sibling of the PlotItem in the scene, so it needs lifting explicitly
+        # or the image paints over the trace.
+        self.long_level_vb.setZValue(plot.zValue() + 100)
+        plot.showAxis("right")
+        plot.scene().addItem(self.long_level_vb)
+        right_axis = plot.getAxis("right")
+        right_axis.linkToView(self.long_level_vb)
+        right_axis.setLabel(
+            f"L{self.weighting}eq,{_duration_label(snapshot.column_s)}", units=self.unit
+        )
+        self.long_level_vb.setXLink(plot)
+        self.long_level_vb.setYRange(ui.level_min, ui.level_max, padding=0)
+
+        dashed = pg.mkPen("#ffffff", width=1, style=QtCore.Qt.PenStyle.DashLine)
+        dashed.setColor(QtGui.QColor(255, 255, 255, 90))
+        for db in _grid_levels(ui.level_min, ui.level_max):
+            self.long_level_vb.addItem(
+                pg.InfiniteLine(pos=db, angle=0, pen=dashed), ignoreBounds=True
+            )
+
+        # Red: viridis contains none of it, so the trace never disappears into
+        # the image whatever the level underneath.
+        self.long_level_curve = pg.PlotDataItem(pen=pg.mkPen("#ff3b30", width=2))
+        self.long_level_vb.addItem(self.long_level_curve)
+
+        plot.vb.sigResized.connect(self._sync_long_overlay)
+        self._sync_long_overlay()
+
+    def _sync_long_overlay(self) -> None:
+        """Hold the level overlay exactly on top of the long-term image."""
+        self.long_level_vb.setGeometry(self.long_plot.vb.sceneBoundingRect())
+        self.long_level_vb.linkedViewChanged(self.long_plot.vb, self.long_level_vb.XAxis)
 
     def _build_header(self) -> QtWidgets.QHBoxLayout:
         row = QtWidgets.QHBoxLayout()
 
         self.level_label = QtWidgets.QLabel("--.-")
         font = QtGui.QFont()
-        font.setPointSize(64)
+        font.setPointSize(44)
         font.setBold(True)
         self.level_label.setFont(font)
         self.level_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignVCenter)
@@ -176,9 +283,11 @@ class MonitorWindow(QtWidgets.QMainWindow):
         weighting = self.config.analysis.weighting.upper()
         # Uncalibrated, the number is a full-scale ratio, not a sound pressure.
         suffix = f"dB{weighting}" if self.engine.calibrated else f"dBFS({weighting})"
+        if self.engine.average_s > 0:
+            suffix += f"\n{self.engine.average_s:g} s avg"
         self.unit_label = QtWidgets.QLabel(suffix)
         unit_font = QtGui.QFont()
-        unit_font.setPointSize(22)
+        unit_font.setPointSize(16)
         self.unit_label.setFont(unit_font)
         self.unit_label.setAlignment(
             QtCore.Qt.AlignmentFlag.AlignBottom | QtCore.Qt.AlignmentFlag.AlignLeft
@@ -223,6 +332,14 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.timer.timeout.connect(self._refresh)
         self.timer.start(int(1000 / self.config.ui.refresh_hz))
 
+        # The long-term panel moves once per averaging window; redrawing it at
+        # the live rate would copy a day of history 30 times a second for
+        # nothing.
+        self.long_timer = QtCore.QTimer(self)
+        self.long_timer.timeout.connect(self._refresh_long_term)
+        self.long_timer.start(max(100, int(1000 * self.config.ui.long_refresh_s)))
+        self._refresh_long_term()
+
     def _refresh(self) -> None:
         columns, state = self.engine.drain()
 
@@ -240,8 +357,9 @@ class MonitorWindow(QtWidgets.QMainWindow):
                 levels=(self.config.ui.db_min, self.config.ui.db_max),
             )
 
-        if np.isfinite(state.level_db):
-            self.level_label.setText(f"{state.level_db:.1f}")
+        level = state.leq_avg if np.isfinite(state.leq_avg) else state.level_db
+        if np.isfinite(level):
+            self.level_label.setText(f"{level:.1f}")
 
         if state.recent_levels:
             times = np.array([t for t, _ in state.recent_levels])
@@ -255,12 +373,21 @@ class MonitorWindow(QtWidgets.QMainWindow):
             self.status_label.setText(f"ERROR: {state.error}")
             self.status_label.setStyleSheet("color: #b00020; font-weight: bold;")
             self.timer.stop()
+            self.long_timer.stop()
+
+    def _refresh_long_term(self) -> None:
+        ui = self.config.ui
+        snapshot = self.engine.long_term()
+        self.long_image.setImage(
+            snapshot.image, autoLevels=False, levels=(ui.db_min, ui.db_max)
+        )
+        if snapshot.n_valid:
+            hours_ago = snapshot.ages_s() / 3600.0
+            self.long_level_curve.setData(-hours_ago, snapshot.levels[-snapshot.n_valid :])
 
     def _update_stats(self, state) -> None:
-        w = self.config.analysis.weighting.upper()
+        w = self.weighting
         lines = []
-        if np.isfinite(state.leq_1s):
-            lines.append(f"L{w}eq,1s  {state.leq_1s:6.1f}")
         iv = state.last_interval
         if iv is not None:
             lines.append(f"L{w}eq,{iv.duration_s:g}s {iv.leq:6.1f}")
@@ -284,6 +411,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
+        self.long_timer.stop()
         self.engine.stop()
         super().closeEvent(event)
 

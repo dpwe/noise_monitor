@@ -43,6 +43,7 @@ scale = "band"       # "band" = level per band, "density" = level per Hz
 weighting = "A"      # headline number: "A", "C" or "Z"
 spectrogram_weighting = "Z"   # leave the spectrogram itself unweighted
 time_weighting = "fast"       # "fast" (125 ms) or "slow" (1 s)
+display_average_s = 1.0       # readout and traces show the Leq over this window
 
 [logging]
 enabled = true
@@ -51,8 +52,17 @@ interval_s = 10.0    # one CSV row per interval
 rotate_daily = true
 
 [ui]
-history_s = 30.0         # seconds of spectrogram on screen
+history_s = 30.0         # seconds of live spectrogram on screen
 level_history_s = 300.0  # seconds in the level trace below it
+
+# The long-term panel underneath: one averaged column per long_column_s,
+# long_span_s / long_column_s columns across the width of the window.
+long_column_s = 180.0    # 3 minutes of audio per column
+long_span_s = 86400.0    # 24 hours across the panel
+long_refresh_s = 1.0     # it moves slowly; no need to redraw it at refresh_hz
+
+level_min = 30.0         # dB range of both level traces
+level_max = 60.0
 db_min = 0.0             # colour scale, in dB SPL
 db_max = 90.0
 colormap = "viridis"

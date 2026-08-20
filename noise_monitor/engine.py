@@ -13,6 +13,7 @@ from .calibration import MicCalibration
 from .capture import AudioSource
 from .config import Config
 from .logsink import CsvLogger
+from .longterm import LongTermAverage, LongTermSnapshot
 from .metrics import IntervalStats
 
 
@@ -21,7 +22,7 @@ class EngineState:
     """A snapshot of the meter, safe to read from the GUI thread."""
 
     level_db: float = float("nan")
-    leq_1s: float = float("nan")
+    leq_avg: float = float("nan")
     clipped: bool = False
     clip_hold: bool = False
     overflows: int = 0
@@ -59,6 +60,9 @@ class MonitorEngine:
         self._levels: deque[tuple[float, float]] = deque(
             maxlen=int(config.ui.level_history_s * hops_per_s) + 64
         )
+        # The long-term panel is fed here rather than from drain(), so it keeps
+        # accumulating whatever the UI does -- including not existing at all.
+        self._long_term = LongTermAverage.from_config(config)
         self._state = EngineState()
         self._clip_hold_blocks = 0
         self._elapsed = 0.0
@@ -75,6 +79,16 @@ class MonitorEngine:
     @property
     def band_centers(self) -> np.ndarray:
         return self.analyzer.band_centers
+
+    @property
+    def average_s(self) -> float:
+        """Window of the rolling Leq behind `EngineState.leq_avg`."""
+        return self.analyzer.average_s
+
+    def long_term(self) -> LongTermSnapshot:
+        """A copy of the long-term average history."""
+        with self._lock:
+            return self._long_term.snapshot()
 
     def start(self) -> None:
         self._stop.clear()
@@ -111,7 +125,7 @@ class MonitorEngine:
             self._columns.clear()
             state = EngineState(
                 level_db=self._state.level_db,
-                leq_1s=self._state.leq_1s,
+                leq_avg=self._state.leq_avg,
                 clipped=self._state.clipped,
                 clip_hold=self._clip_hold_blocks > 0,
                 overflows=self._state.overflows,
@@ -151,10 +165,11 @@ class MonitorEngine:
 
                 with self._lock:
                     self._columns.extend(frame.columns)
-                    for _ in frame.columns:
-                        self._levels.append((self._elapsed, frame.level_db))
+                    for column in frame.columns:
+                        self._levels.append((self._elapsed, frame.leq_avg))
+                        self._long_term.add(column, frame.leq_avg)
                     self._state.level_db = frame.level_db
-                    self._state.leq_1s = frame.leq_1s
+                    self._state.leq_avg = frame.leq_avg
                     self._state.clipped = frame.clipped
                     self._state.dropped_blocks += dropped
                     self._state.overflows = getattr(self.source, "overflows", 0)

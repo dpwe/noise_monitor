@@ -11,7 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from pyqtgraph.Qt import QtWidgets  # noqa: E402
 
 from noise_monitor.spectrum import BandMapper, StreamingSTFT  # noqa: E402
-from noise_monitor.ui import LogFreqAxis  # noqa: E402
+from noise_monitor.ui import LogFreqAxis, _duration_label, _grid_levels  # noqa: E402
 
 
 @pytest.fixture(scope="session")
@@ -77,3 +77,21 @@ def test_ticks_stay_inside_the_band_range(axis):
 def test_degenerate_axis_returns_no_ticks(axis):
     assert axis.tickValues(0, 0, 100.0) == []
     assert axis.tickValues(0, 100, 0.0) == []
+
+
+@pytest.mark.parametrize(
+    "seconds,expected",
+    [(1.0, "1s"), (0.125, "0.125s"), (10.0, "10s"), (60.0, "1min"),
+     # A column is a whole number of hops, so the nominal 3 min is really
+     # 180.011 s -- the label must not say so.
+     (180.011, "3min"), (3600.0, "1h"), (86400.5, "24h")],
+)
+def test_duration_labels_are_readable(seconds, expected):
+    assert _duration_label(seconds) == expected
+
+
+def test_grid_levels_stay_strictly_inside_the_range():
+    assert _grid_levels(30.0, 60.0) == [40.0, 50.0]
+    # The ends are the axis itself; a line drawn on them is just noise.
+    assert _grid_levels(30.0, 50.0) == [40.0]
+    assert _grid_levels(41.0, 49.0) == []

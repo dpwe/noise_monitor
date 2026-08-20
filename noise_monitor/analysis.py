@@ -39,8 +39,9 @@ class AnalysisFrame:
     columns: list[np.ndarray] = field(default_factory=list)
     #: Current exponentially time-weighted level, e.g. LAF, in dB SPL.
     level_db: float = float("nan")
-    #: Linear (rectangular) Leq over the last second.
-    leq_1s: float = float("nan")
+    #: Linear (rectangular) Leq over the last `Analyzer.average_s` seconds.
+    #: This is what the readout shows -- steadier than the exponential level.
+    leq_avg: float = float("nan")
     #: True if any sample in this block reached the clipping threshold.
     clipped: bool = False
 
@@ -111,7 +112,10 @@ class Analyzer:
         # the meter warming up rather than the sound field.
         self._settle_remaining = int(round(SETTLE_TIME_CONSTANTS * tau * self.samplerate))
 
-        # Rolling one-second Leq, as (sum of squares, sample count) per block.
+        # Rolling Leq for the display, as (sum of squares, sample count) per
+        # block, over a window of `average_s`.
+        self.average_s = max(0.0, float(ancfg.display_average_s))
+        self._average_samples = max(1, int(round(self.average_s * self.samplerate)))
         self._recent: deque[tuple[float, int]] = deque()
         self._recent_samples = 0
 
@@ -154,7 +158,7 @@ class Analyzer:
             )
 
         level_db = 10 * np.log10(max(float(time_ms[-1]), 1e-20)) + self.spl_offset_db
-        leq_1s = self._rolling_leq(weighted)
+        leq_avg = self._rolling_leq(weighted)
 
         # Spectrogram columns.
         columns = []
@@ -171,7 +175,7 @@ class Analyzer:
             columns.append(db + self._band_weight_db)
 
         return AnalysisFrame(
-            columns=columns, level_db=level_db, leq_1s=leq_1s, clipped=clipped
+            columns=columns, level_db=level_db, leq_avg=leq_avg, clipped=clipped
         )
 
     def pop_intervals(self) -> list[IntervalStats]:
@@ -183,7 +187,7 @@ class Analyzer:
     def _rolling_leq(self, weighted: np.ndarray) -> float:
         self._recent.append((float(np.dot(weighted, weighted)), weighted.size))
         self._recent_samples += weighted.size
-        while self._recent_samples - self._recent[0][1] >= self.samplerate:
+        while self._recent_samples - self._recent[0][1] >= self._average_samples:
             _, n = self._recent.popleft()
             self._recent_samples -= n
         total = sum(s for s, _ in self._recent)

@@ -61,8 +61,12 @@ class AnalysisConfig:
     #: Weighting applied to the spectrogram itself. "Z" (none) shows the actual
     #: band sound pressure, which is normally what you want to look at.
     spectrogram_weighting: str = "Z"
-    #: Exponential time weighting for the live readout: "fast" or "slow".
+    #: Exponential time weighting for the level statistics: "fast" or "slow".
     time_weighting: str = "fast"
+    #: Window of the rolling Leq shown as the live readout and level trace.
+    #: The exponential (fast/slow) level is jumpy to read; this is the average
+    #: level over the last `display_average_s` seconds instead.
+    display_average_s: float = 1.0
 
 
 @dataclass
@@ -80,6 +84,18 @@ class UIConfig:
     history_s: float = 30.0
     #: Seconds of level history in the bottom trace.
     level_history_s: float = 300.0
+    #: Seconds of audio averaged into one column of the long-term panel.
+    long_column_s: float = 180.0
+    #: Total time span of the long-term panel.
+    long_span_s: float = 86400.0
+    #: dB range of the level traces -- both the live one and the one drawn
+    #: over the long-term panel. Much narrower than the colour scale, because
+    #: a day of background noise lives in about 30 dB.
+    level_min: float = 30.0
+    level_max: float = 60.0
+    #: How often the long-term panel is redrawn. It moves at `long_column_s`,
+    #: so there is nothing to gain from the main refresh rate.
+    long_refresh_s: float = 1.0
     db_min: float = 0.0
     db_max: float = 90.0
     colormap: str = "viridis"
