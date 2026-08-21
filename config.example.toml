@@ -62,7 +62,7 @@ long_span_s = 86400.0    # 24 hours across the panel
 long_refresh_s = 1.0     # it moves slowly; no need to redraw it at refresh_hz
 
 level_min = 30.0         # dB range of the level trace over the long-term panel
-level_max = 60.0
+level_max = 70.0
 db_min = 0.0             # colour scale, in dB SPL
 db_max = 90.0
 colormap = "viridis"

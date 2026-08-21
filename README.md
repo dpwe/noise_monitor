@@ -174,10 +174,10 @@ across the room. Fast/Slow is still what `LAmax`, the percentiles in the CSV
 and the long-term panel are measured from, per IEC 61672; how smooth you like
 the readout has no effect on anything that gets recorded.
 
-The red trace uses `ui.level_min`..`ui.level_max` (30–60 dB), which is where
-residential background noise lives; the spectrograms keep the wider
-`db_min`..`db_max` colour scale, and share one colour bar. Widen the trace if
-you are measuring something louder.
+The long-term panel's x axis is the local 24 hour clock, ticked on round hours.
+The red trace over it uses `ui.level_min`..`ui.level_max` (30–70 dB), which
+covers residential background through to a passing truck; the spectrograms keep
+the wider `db_min`..`db_max` colour scale, and share one colour bar.
 
 | Key | Action |
 |---|---|

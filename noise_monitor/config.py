@@ -86,11 +86,11 @@ class UIConfig:
     long_column_s: float = 180.0
     #: Total time span of the long-term panel.
     long_span_s: float = 86400.0
-    #: dB range of the level traces -- both the live one and the one drawn
-    #: over the long-term panel. Much narrower than the colour scale, because
-    #: a day of background noise lives in about 30 dB.
+    #: dB range of the level trace drawn over the long-term panel. Much
+    #: narrower than the colour scale, because a day of residential noise
+    #: lives in about 40 dB.
     level_min: float = 30.0
-    level_max: float = 60.0
+    level_max: float = 70.0
     #: How often the long-term panel is redrawn. It moves at `long_column_s`,
     #: so there is nothing to gain from the main refresh rate.
     long_refresh_s: float = 1.0

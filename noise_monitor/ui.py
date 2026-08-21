@@ -14,6 +14,8 @@ labels are remapped to the real frequencies.
 
 from __future__ import annotations
 
+import time
+
 import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
@@ -106,10 +108,63 @@ def _duration_label(seconds: float) -> str:
     return f"{seconds:.3g}s"
 
 
-def _grid_levels(low: float, high: float, step: float = 10.0) -> list[float]:
-    """Round dB values strictly inside (low, high), for the overlay's grid."""
-    first = np.ceil(low / step) * step
-    return [float(v) for v in np.arange(first, high, step) if low < v < high]
+class ClockAxis(pg.AxisItem):
+    """Labels an "hours before now" axis with the local 24 hour clock.
+
+    The panel scrolls, so the mapping from position to clock time moves with
+    it; `set_now` is called on every redraw to keep it current.
+
+    Ticks are placed on round local hours rather than at round offsets from
+    now, so they stay put between redraws instead of sliding. Each tick's
+    instant is a fixed number of seconds before now, and its label is whatever
+    the local clock read then -- so an autumn DST change prints 01:00 twice,
+    which is what the clock actually did.
+    """
+
+    #: Candidate tick spacings in hours, finest first.
+    TICK_HOURS = (1, 2, 3, 6, 12)
+    #: Minimum pixel gap between two labels.
+    MIN_TICK_SPACING_PX = 70
+
+    def __init__(self, **kwargs):
+        super().__init__(orientation="bottom", **kwargs)
+        self.enableAutoSIPrefix(False)
+        self._now = time.time()
+
+    def set_now(self, now: float) -> None:
+        self._now = float(now)
+        self.picture = None  # the labels changed; force a repaint
+        self.update()
+
+    def tickValues(self, minVal, maxVal, size):
+        if maxVal <= minVal or size <= 0:
+            return []
+        px_per_hour = size / (maxVal - minVal)
+        step = next(
+            (h for h in self.TICK_HOURS if h * px_per_hour >= self.MIN_TICK_SPACING_PX),
+            self.TICK_HOURS[-1],
+        )
+
+        # The most recent instant whose local clock is a round multiple of the
+        # step, on the hour. Reading tm_min off localtime rather than flooring
+        # the timestamp keeps the half-hour time zones honest.
+        local = time.localtime(self._now)
+        back = local.tm_min * 60 + local.tm_sec + (local.tm_hour % step) * 3600
+
+        values = []
+        position = -back / 3600.0
+        while position >= minVal:
+            if position <= maxVal:
+                values.append(position)
+            position -= step
+        values.reverse()
+        return [(step, values)]
+
+    def tickStrings(self, values, scale, spacing):
+        return [
+            time.strftime("%H:%M", time.localtime(self._now + float(v) * 3600.0))
+            for v in values
+        ]
 
 
 class MonitorWindow(QtWidgets.QMainWindow):
@@ -211,15 +266,17 @@ class MonitorWindow(QtWidgets.QMainWindow):
         ui = self.config.ui
         snapshot = self.engine.long_term()
 
+        self.clock_axis = ClockAxis()
         plot = self.glw.addPlot(
-            row=1, col=0, axisItems={"left": LogFreqAxis(self.engine.band_centers)}
+            row=1,
+            col=0,
+            axisItems={
+                "left": LogFreqAxis(self.engine.band_centers),
+                "bottom": self.clock_axis,
+            },
         )
         self.long_plot = plot
         plot.setLabel("left", "Frequency", units="Hz")
-        # Hours are not an SI unit; without this the axis reads "mh" whenever
-        # the span is short enough for pyqtgraph to reach for a prefix.
-        plot.getAxis("bottom").enableAutoSIPrefix(False)
-        plot.setLabel("bottom", "Time (hours ago)")
         plot.setMouseEnabled(x=False, y=False)
         plot.hideButtons()
 
@@ -243,13 +300,6 @@ class MonitorWindow(QtWidgets.QMainWindow):
         )
         self.long_level_vb.setXLink(plot)
         self.long_level_vb.setYRange(ui.level_min, ui.level_max, padding=0)
-
-        dashed = pg.mkPen("#ffffff", width=1, style=QtCore.Qt.PenStyle.DashLine)
-        dashed.setColor(QtGui.QColor(255, 255, 255, 90))
-        for db in _grid_levels(ui.level_min, ui.level_max):
-            self.long_level_vb.addItem(
-                pg.InfiniteLine(pos=db, angle=0, pen=dashed), ignoreBounds=True
-            )
 
         # Red: viridis contains none of it, so the trace never disappears into
         # the image whatever the level underneath.
@@ -400,6 +450,9 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.long_image.setImage(
             snapshot.image, autoLevels=False, levels=(ui.db_min, ui.db_max)
         )
+        # The right-hand edge of the image is now, so the clock labels move
+        # with every redraw even though the tick positions do not.
+        self.clock_axis.set_now(time.time())
         if snapshot.n_valid:
             hours_ago = snapshot.ages_s() / 3600.0
             self.long_level_curve.setData(-hours_ago, snapshot.levels[-snapshot.n_valid :])
