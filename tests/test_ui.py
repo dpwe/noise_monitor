@@ -149,10 +149,19 @@ def test_no_ticks_collide(clock):
     assert np.all(px >= ClockAxis.MIN_TICK_SPACING_PX - 1e-6)
 
 
-def test_a_short_span_still_gets_ticks(clock):
-    _, values, labels = _clock_ticks(clock, lo=-3.0, hi=0.0, size=1000.0)
+def test_a_short_span_gets_sub_hour_ticks(clock):
+    """An hour is the wrong grain for a --long-span of a few hours."""
+    spacing, values, labels = _clock_ticks(clock, lo=-3.0, hi=0.0, size=1000.0)
+    assert spacing == pytest.approx(0.25)  # 15 minutes
+    assert len(values) >= 8
+    assert labels[-1] == "14:30"
+
+
+def test_a_span_shorter_than_an_hour_is_still_labelled(clock):
+    """Regression: hour-only steps left such a span with no ticks at all."""
+    _, values, labels = _clock_ticks(clock, lo=-0.25, hi=0.0, size=1000.0)
     assert len(values) >= 2
-    assert labels[-1] == "14:00"
+    assert [label[:3] for label in labels] == ["14:"] * len(labels)
 
 
 def test_moving_now_moves_the_labels(clock):
@@ -163,6 +172,13 @@ def test_moving_now_moves_the_labels(clock):
     # Advance by exactly one spacing and the grid shifts along by one tick:
     # what was the newest label is now the second newest.
     assert after[-2] == before[-1]
+
+
+def test_a_span_with_no_round_time_in_it_labels_the_edge(clock):
+    """Never hand back a bare axis: the right-hand edge is always now."""
+    _, values, labels = _clock_ticks(clock, lo=-0.004, hi=0.0, size=1000.0)
+    assert values == [0.0]
+    assert labels == ["14:37"]
 
 
 def test_degenerate_axis_returns_no_ticks(clock):

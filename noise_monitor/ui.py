@@ -121,8 +121,9 @@ class ClockAxis(pg.AxisItem):
     which is what the clock actually did.
     """
 
-    #: Candidate tick spacings in hours, finest first.
-    TICK_HOURS = (1, 2, 3, 6, 12)
+    #: Candidate tick spacings in minutes, finest first. Each divides an hour
+    #: or a day, so ticks land on the same clock times every cycle.
+    TICK_MINUTES = (1, 5, 15, 30, 60, 120, 180, 360, 720)
     #: Minimum pixel gap between two labels.
     MIN_TICK_SPACING_PX = 70
 
@@ -140,25 +141,37 @@ class ClockAxis(pg.AxisItem):
         if maxVal <= minVal or size <= 0:
             return []
         px_per_hour = size / (maxVal - minVal)
-        step = next(
-            (h for h in self.TICK_HOURS if h * px_per_hour >= self.MIN_TICK_SPACING_PX),
-            self.TICK_HOURS[-1],
+        step_min = next(
+            (
+                m for m in self.TICK_MINUTES
+                if (m / 60.0) * px_per_hour >= self.MIN_TICK_SPACING_PX
+            ),
+            self.TICK_MINUTES[-1],
         )
+        step_hours = step_min / 60.0
 
         # The most recent instant whose local clock is a round multiple of the
-        # step, on the hour. Reading tm_min off localtime rather than flooring
-        # the timestamp keeps the half-hour time zones honest.
+        # step since local midnight. Sub-hour steps matter: a `--long-span` of
+        # an hour or less would otherwise get no ticks at all. Reading the
+        # fields off localtime rather than flooring the timestamp keeps the
+        # half-hour time zones honest.
         local = time.localtime(self._now)
-        back = local.tm_min * 60 + local.tm_sec + (local.tm_hour % step) * 3600
+        since_midnight = local.tm_hour * 3600 + local.tm_min * 60 + local.tm_sec
+        back = since_midnight % (step_min * 60)
 
         values = []
         position = -back / 3600.0
         while position >= minVal:
             if position <= maxVal:
                 values.append(position)
-            position -= step
+            position -= step_hours
         values.reverse()
-        return [(step, values)]
+        if not values:
+            # A span shorter than the finest step -- no round clock time falls
+            # inside it. Label the right-hand edge, which is now, rather than
+            # handing back a bare axis.
+            values = [maxVal]
+        return [(step_hours, values)]
 
     def tickStrings(self, values, scale, spacing):
         return [
