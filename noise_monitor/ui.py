@@ -187,23 +187,24 @@ class ClockAxis(pg.AxisItem):
         return [(step_hours, values)]
 
     def tickStrings(self, values, scale, spacing):
-        """Clock times, with the date on any tick that opens a new day.
+        """Clock times, with the date on the tick that opens a new day.
 
-        Over a day that is the midnight tick. The oldest tick is dated too,
-        both because its day is otherwise unnamed and because a span short
-        enough to miss midnight would otherwise carry no date at all.
+        Over a day that is the midnight tick, and one date is enough: what is
+        right of the mark is that date, what is left is the day before. A span
+        that never crosses midnight has no such tick, so the oldest one is
+        dated instead -- otherwise the date would never appear at all.
         """
-        out = []
-        previous_date = None
-        for value in values:
-            when = time.localtime(self._now + float(value) * 3600.0)
-            label = time.strftime("%H:%M", when)
-            date = time.strftime("%Y-%m-%d", when)
-            if date != previous_date:
-                label = f"{label}\n{date}"
-                previous_date = date
-            out.append(label)
-        return out
+        when = [time.localtime(self._now + float(v) * 3600.0) for v in values]
+        times = [time.strftime("%H:%M", w) for w in when]
+        dates = [time.strftime("%Y-%m-%d", w) for w in when]
+
+        opens = {i for i in range(1, len(dates)) if dates[i] != dates[i - 1]}
+        if not opens and dates:
+            opens = {0}
+        return [
+            f"{clock}\n{dates[i]}" if i in opens else clock
+            for i, clock in enumerate(times)
+        ]
 
 
 class MonitorWindow(QtWidgets.QMainWindow):
@@ -215,6 +216,9 @@ class MonitorWindow(QtWidgets.QMainWindow):
     READOUT_POINT_SIZES = (22, 8, 7)
     #: How long a transient status message (a saved screenshot) stays up.
     STATUS_FLASH_MS = 5000
+    #: Tallest the colour bar gets. It is a legend, not a plot; at full window
+    #: height it dominated a column it shares with nothing else.
+    COLORBAR_MAX_HEIGHT_PX = 240
 
     def __init__(self, engine: MonitorEngine, config: Config):
         super().__init__()
@@ -297,7 +301,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
             label=f"Band {self.unit}",
         )
         self.bar.setImageItem([self.image, self.long_image])
+        self.bar.setMaximumHeight(self.COLORBAR_MAX_HEIGHT_PX)
         self.glw.addItem(self.bar, row=0, col=1, rowspan=len(self.ROW_STRETCH))
+        # Capped and top-aligned, so the space below it is free for the button.
+        self.glw.ci.layout.setAlignment(self.bar, QtCore.Qt.AlignmentFlag.AlignTop)
 
     def _build_long_term(self) -> None:
         """The day-long panel: an averaged spectrogram with the Leq on top.
@@ -376,10 +383,31 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.clip_label.setText("CLIP")
         self.clip_label.setVisible(False)
 
+        self.shot_button = self._build_shot_button()
+
         # Follow the image, not the window: the plot area moves when the axis
         # labels change width.
         self.spec_plot.vb.sigResized.connect(self._place_overlay)
         self._place_overlay()
+
+    def _build_shot_button(self) -> QtWidgets.QPushButton:
+        """A mouse-reachable twin of the S key, tucked under the colour bar."""
+        button = QtWidgets.QPushButton("Shot", self.glw)
+        font = QtGui.QFont()
+        font.setPointSize(10)
+        button.setFont(font)
+        button.setToolTip("Save a PNG of the window (S)")
+        button.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)  # keep S, F, Q live
+        button.setStyleSheet(
+            "QPushButton { color: #ddd; background-color: #3a3a3a;"
+            " border: 1px solid #555; border-radius: 4px; padding: 3px 10px; }"
+            "QPushButton:hover { background-color: #4a4a4a; }"
+            "QPushButton:pressed { background-color: #2a2a2a; }"
+        )
+        button.clicked.connect(lambda: self.save_screenshot())
+        button.raise_()
+        return button
 
     def _set_level_text(self, number: str) -> None:
         big, small, tiny = self.READOUT_POINT_SIZES
@@ -428,6 +456,13 @@ class MonitorWindow(QtWidgets.QMainWindow):
             label.adjustSize()
         self.level_label.move(left, top)
         self.clip_label.move(left, top + self.level_label.height() + 4)
+
+        bar = self.glw.mapFromScene(self.bar.sceneBoundingRect()).boundingRect()
+        self.shot_button.adjustSize()
+        self.shot_button.move(
+            bar.center().x() - self.shot_button.width() // 2,
+            bar.bottom() + self.OVERLAY_MARGIN_PX,
+        )
 
     def _build_status(self) -> QtWidgets.QLabel:
         self.status_label = QtWidgets.QLabel()
@@ -553,7 +588,13 @@ class MonitorWindow(QtWidgets.QMainWindow):
         path = directory / time.strftime("noise-monitor-%Y%m%d-%H%M%S.png")
         try:
             directory.mkdir(parents=True, exist_ok=True)
-            if not self.grab().save(str(path)):
+            # The button is chrome, not measurement; keep it out of the image.
+            self.shot_button.setVisible(False)
+            try:
+                image = self.grab()
+            finally:
+                self.shot_button.setVisible(True)
+            if not image.save(str(path)):
                 raise OSError("Qt could not write the image")
         except OSError as exc:
             # A full or read-only disk must not take the meter down with it.

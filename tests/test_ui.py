@@ -175,16 +175,13 @@ def test_the_midnight_tick_carries_the_date(clock):
     assert midnight == ["00:00\n2026-08-21"]
 
 
-def test_the_oldest_tick_is_dated_so_its_day_is_named_too(clock):
+def test_one_date_is_enough_over_a_day(clock):
+    """Left of the midnight mark is the day before -- saying so twice is noise,
+    and when the oldest tick falls near midnight the two labels collide."""
     _, _, labels = _clock_ticks(clock)
-    assert labels[0].endswith("\n2026-08-20")  # the day before
-
-
-def test_only_day_openings_are_dated(clock):
-    """A date on every tick would be unreadable; one per day is the point."""
-    _, _, labels = _clock_ticks(clock)
-    assert len(_dated(labels)) == 2  # yesterday at the left edge, then midnight
+    assert len(_dated(labels)) == 1
     assert len(labels) > 6
+    assert not labels[0].endswith("2026-08-20")
 
 
 def test_a_span_inside_one_day_is_still_dated_once(clock):

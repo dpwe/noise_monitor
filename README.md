@@ -175,7 +175,7 @@ and the long-term panel are measured from, per IEC 61672; how smooth you like
 the readout has no effect on anything that gets recorded.
 
 The long-term panel's x axis is the local 24 hour clock, ticked on round hours,
-with the date stacked under whichever tick opens a new day — midnight, over a
+with the date stacked under the tick that opens a new day — midnight, over a
 full day, so everything right of that mark is the dated day and everything left
 of it the one before.
 The red trace over it uses `ui.level_min`..`ui.level_max` (30–70 dB), which
@@ -184,12 +184,14 @@ the wider `db_min`..`db_max` colour scale, and share one colour bar.
 
 | Key | Action |
 |---|---|
-| `S` | Save a PNG of the window to `ui.screenshot_dir` |
+| `S` | Save a PNG of the window to `ui.screenshot_dir` (or click **Shot**) |
 | `F` | Toggle fullscreen |
 | `Q` / `Esc` | Quit |
 
-The status line says where a screenshot went, for five seconds — after the
-grab, so the message is never in the image. Screenshots land in
+**Shot**, under the colour bar, does the same thing with the mouse; it hides
+itself for the grab, so it is never in its own screenshot. The status line says
+where the file went, for five seconds — also after the grab, so the message is
+never in the image. Screenshots land in
 `ui.screenshot_dir` (`screenshots/` by default, `--screenshot-dir` to move it)
 as `noise-monitor-YYYYMMDD-HHMMSS.png`.
 
