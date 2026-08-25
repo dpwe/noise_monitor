@@ -99,6 +99,8 @@ class UIConfig:
     colormap: str = "viridis"
     refresh_hz: float = 30.0
     fullscreen: bool = False
+    #: Where the S key writes PNGs of the window.
+    screenshot_dir: Path = Path("screenshots")
 
 
 @dataclass

@@ -68,3 +68,4 @@ db_max = 90.0
 colormap = "viridis"
 refresh_hz = 30.0
 fullscreen = false
+screenshot_dir = "screenshots"   # where the S key writes PNGs

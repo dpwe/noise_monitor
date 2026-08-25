@@ -95,6 +95,9 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--db-min", type=float, help="colour scale minimum")
     p.add_argument("--db-max", type=float, help="colour scale maximum")
     p.add_argument("--log-dir", type=Path, help="directory for CSV logs")
+    p.add_argument(
+        "--screenshot-dir", type=Path, help="where the S key writes PNGs"
+    )
     p.add_argument("--log-interval", type=float, help="seconds per logged row")
     p.add_argument("--no-log", action="store_true", help="disable CSV logging")
     p.add_argument("--fullscreen", action="store_true")
@@ -142,6 +145,8 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         cfg.ui.db_max = args.db_max
     if a("log_dir") is not None:
         cfg.logging.directory = args.log_dir
+    if a("screenshot_dir") is not None:
+        cfg.ui.screenshot_dir = args.screenshot_dir
     if a("log_interval") is not None:
         cfg.logging.interval_s = args.log_interval
     if a("no_log"):

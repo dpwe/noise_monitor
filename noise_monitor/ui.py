@@ -15,6 +15,7 @@ labels are remapped to the real frequencies.
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 import numpy as np
 import pyqtgraph as pg
@@ -126,11 +127,23 @@ class ClockAxis(pg.AxisItem):
     TICK_MINUTES = (1, 5, 15, 30, 60, 120, 180, 360, 720)
     #: Minimum pixel gap between two labels.
     MIN_TICK_SPACING_PX = 70
+    #: Room for the tick marks and their offset, on top of the two text lines.
+    LABEL_PADDING_PX = 14
 
     def __init__(self, **kwargs):
         super().__init__(orientation="bottom", **kwargs)
         self.enableAutoSIPrefix(False)
         self._now = time.time()
+
+    def reserve_date_line(self) -> None:
+        """Claim height for the second line of the dated labels.
+
+        The axis sizes itself from one line of tick text, so the date
+        underneath is drawn past its bottom edge and clipped. Ask for the room
+        up front instead.
+        """
+        line = QtGui.QFontMetrics(self.font()).height()
+        self.setHeight(2 * line + self.LABEL_PADDING_PX)
 
     def set_now(self, now: float) -> None:
         self._now = float(now)
@@ -168,16 +181,29 @@ class ClockAxis(pg.AxisItem):
         values.reverse()
         if not values:
             # A span shorter than the finest step -- no round clock time falls
-            # inside it. Label the right-hand edge, which is now, rather than
-            # handing back a bare axis.
-            values = [maxVal]
+            # inside it. Label the middle rather than handing back a bare axis:
+            # a tick on the boundary gets culled for overflowing it.
+            values = [(minVal + maxVal) / 2.0]
         return [(step_hours, values)]
 
     def tickStrings(self, values, scale, spacing):
-        return [
-            time.strftime("%H:%M", time.localtime(self._now + float(v) * 3600.0))
-            for v in values
-        ]
+        """Clock times, with the date on any tick that opens a new day.
+
+        Over a day that is the midnight tick. The oldest tick is dated too,
+        both because its day is otherwise unnamed and because a span short
+        enough to miss midnight would otherwise carry no date at all.
+        """
+        out = []
+        previous_date = None
+        for value in values:
+            when = time.localtime(self._now + float(value) * 3600.0)
+            label = time.strftime("%H:%M", when)
+            date = time.strftime("%Y-%m-%d", when)
+            if date != previous_date:
+                label = f"{label}\n{date}"
+                previous_date = date
+            out.append(label)
+        return out
 
 
 class MonitorWindow(QtWidgets.QMainWindow):
@@ -187,6 +213,8 @@ class MonitorWindow(QtWidgets.QMainWindow):
     OVERLAY_MARGIN_PX = 10
     #: Point sizes in the overlaid readout: number, unit, averaging note.
     READOUT_POINT_SIZES = (22, 8, 7)
+    #: How long a transient status message (a saved screenshot) stays up.
+    STATUS_FLASH_MS = 5000
 
     def __init__(self, engine: MonitorEngine, config: Config):
         super().__init__()
@@ -200,6 +228,9 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.unit = "dB SPL" if engine.calibrated else "dBFS"
         self._level_number = ""
         self._status_extra = ""
+        self._status_style = "color: #888;"
+        self._status_flashing = False
+        self._fatal = False
         self.weighting = config.analysis.weighting.upper()
 
         # image[time, freq] with col-major image order.
@@ -292,6 +323,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         plot.setLabel("left", "Frequency", units="Hz")
         plot.setMouseEnabled(x=False, y=False)
         plot.hideButtons()
+        self.clock_axis.reserve_date_line()
 
         self.long_image = pg.ImageItem(snapshot.image)
         plot.addItem(self.long_image)
@@ -399,15 +431,31 @@ class MonitorWindow(QtWidgets.QMainWindow):
 
     def _build_status(self) -> QtWidgets.QLabel:
         self.status_label = QtWidgets.QLabel()
-        self.status_label.setStyleSheet("color: #888;")
         note = self.engine.calibration_note
         text = f"{self.engine.source.description}  |  calibration: {note}"
         if not self.engine.calibrated:
             text += "  |  showing dBFS, NOT absolute SPL"
-            self.status_label.setStyleSheet("color: #b06000; font-weight: bold;")
+            self._status_style = "color: #b06000; font-weight: bold;"
         self._status_text = text
+        self.status_label.setStyleSheet(self._status_style)
         self.status_label.setText(text)
         return self.status_label
+
+    def _flash_status(self, message: str, error: bool = False) -> None:
+        """Say something in the status line, then put it back as it was."""
+        self._status_flashing = True
+        self.status_label.setStyleSheet(
+            f"color: {'#b00020' if error else '#2e7d32'}; font-weight: bold;"
+        )
+        self.status_label.setText(message)
+        QtCore.QTimer.singleShot(self.STATUS_FLASH_MS, self._restore_status)
+
+    def _restore_status(self) -> None:
+        self._status_flashing = False
+        if self._fatal:  # an error arrived while the message was up; leave it
+            return
+        self.status_label.setStyleSheet(self._status_style)
+        self.status_label.setText(self._status_text + self._status_extra)
 
     # ------------------------------------------------------------------
     def _start_timer(self) -> None:
@@ -452,6 +500,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self._update_status(state)
 
         if state.error:
+            self._fatal = True
             self.status_label.setText(f"ERROR: {state.error}")
             self.status_label.setStyleSheet("color: #b00020; font-weight: bold;")
             self.timer.stop()
@@ -481,7 +530,8 @@ class MonitorWindow(QtWidgets.QMainWindow):
             extra = f"  |  dropped {state.dropped_blocks} / xrun {state.overflows}"
         if extra != self._status_extra:
             self._status_extra = extra
-            self.status_label.setText(self._status_text + extra)
+            if not self._status_flashing:  # it will be picked up on restore
+                self.status_label.setText(self._status_text + extra)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
@@ -492,8 +542,25 @@ class MonitorWindow(QtWidgets.QMainWindow):
                 self.showNormal()
             else:
                 self.showFullScreen()
+        elif key == QtCore.Qt.Key.Key_S:
+            self.save_screenshot()
         else:
             super().keyPressEvent(event)
+
+    def save_screenshot(self) -> Path | None:
+        """Write a PNG of the window and report where it went, or why not."""
+        directory = Path(self.config.ui.screenshot_dir).expanduser()
+        path = directory / time.strftime("noise-monitor-%Y%m%d-%H%M%S.png")
+        try:
+            directory.mkdir(parents=True, exist_ok=True)
+            if not self.grab().save(str(path)):
+                raise OSError("Qt could not write the image")
+        except OSError as exc:
+            # A full or read-only disk must not take the meter down with it.
+            self._flash_status(f"screenshot failed: {exc}", error=True)
+            return None
+        self._flash_status(f"screenshot saved to {path}")
+        return path
 
     def closeEvent(self, event) -> None:
         self.timer.stop()
