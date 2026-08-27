@@ -17,23 +17,37 @@ Two independent pieces of calibration live in that file:
    deviation, normalised to 0 dB at 1 kHz. Following the REW convention they are
    *subtracted* from measurements.
 
-2. **Absolute sensitivity** -- the ``Sens Factor`` is, per the REW
-   documentation, "the input dBFS reading the mic will produce when driven by a
-   94 dB calibrator with the input volume set to maximum". So, at that reference
-   gain::
+2. **Absolute sensitivity** -- the ``Sens Factor``. REW documents this as "the
+   input dBFS reading the mic will produce when driven by a 94 dB calibrator
+   with the input volume set to maximum", which reads as::
 
-       dB SPL = dBFS_rms + (94 - sens_factor)
+       dB SPL = dBFS_rms + (94 - sens_factor)          # INCOMPLETE, see below
 
    where dBFS_rms is a plain RMS relative to a full-scale amplitude of 1.0 (a
    full-scale sine therefore reads -3.01 dBFS, which is the convention REW
    states it uses).
 
-   The "input volume at maximum" condition matters: the UMIK-1's USB gain
-   control is a real, driver-visible gain. If the capture level is not at the
-   reference setting, the difference has to be added back -- see
-   ``CalibrationConfig.input_gain_db`` and the README. An acoustic calibrator
-   measurement (``noise-monitor calibrate``) bypasses the whole question and is
-   the ground truth when available.
+   **That formula is not sufficient on its own.** Taken literally it puts a
+   UMIK-1's overload point at about 92 dB SPL -- roughly a loud conversation --
+   whereas the hardware is good to around 120 dB. Every Sens Factor in the wild
+   is a small number near zero (-1.055, -0.667, REW's own example 1.2345);
+   absolute sensitivities would scatter around -30 dBFS instead. The figure is
+   evidently a per-unit *trim* on a nominal sensitivity for the model, which REW
+   knows internally and does not appear to publish. Measured against a real
+   UMIK-1 the missing term is about 30 dB.
+
+   So this module computes the formula above and ``headroom_warning`` flags the
+   result when it implies an impossible overload point. Do not trust a
+   Sens-Factor-only offset for absolute SPL: measure it with ``noise-monitor
+   calibrate`` and an acoustic calibrator, which bypasses the question entirely
+   and is the ground truth when available.
+
+   Separately, the "input volume at maximum" condition matters: the UMIK-1's USB
+   gain control is a real, driver-visible gain. If the capture level is not at
+   the reference setting, the difference has to be added back -- see
+   ``CalibrationConfig.input_gain_db`` and the README. That term is for
+   attenuation you have dialled in, *not* for the missing nominal sensitivity
+   above; put that in ``spl_offset_db`` so the two stay distinguishable.
 """
 
 from __future__ import annotations
@@ -47,6 +61,14 @@ from scipy.signal import firwin2
 
 #: SPL of the reference acoustic calibrator the Sens Factor is defined against.
 REFERENCE_CALIBRATOR_SPL = 94.0
+
+#: A measurement microphone appearing to overload below this is not a
+#: microphone problem -- it is an offset roughly 30 dB too small. See the
+#: module docstring.
+MIN_PLAUSIBLE_CLIP_SPL = 100.0
+
+#: A full-scale sine is -3.01 dBFS RMS, so that is where clipping lands.
+_FULL_SCALE_SINE_DBFS = -3.01
 
 _SENS_RE = re.compile(r"Sens\s*Factor\s*=\s*(-?\d*\.?\d+)\s*dB", re.IGNORECASE)
 _SERNO_RE = re.compile(r"SERNO:\s*(\S+)", re.IGNORECASE)
@@ -184,6 +206,32 @@ def design_correction_fir(
     # Strictly increasing frequencies are required.
     keep = np.concatenate(([True], np.diff(freqs) > 0))
     return firwin2(numtaps, freqs[keep], gains[keep], fs=samplerate)
+
+
+def clipping_spl(spl_offset_db: float) -> float:
+    """The sound pressure at which a full-scale sine would clip the input."""
+    return spl_offset_db + _FULL_SCALE_SINE_DBFS
+
+
+def headroom_warning(spl_offset_db: float) -> str | None:
+    """Flag an offset that implies an impossible overload point, or None.
+
+    This is the loudest symptom of a Sens-Factor-only offset, and it is a
+    cheap, decisive check: no measurement microphone worth calibrating gives
+    up below 100 dB SPL.
+    """
+    clip = clipping_spl(spl_offset_db)
+    if clip >= MIN_PLAUSIBLE_CLIP_SPL:
+        return None
+    return (
+        f"WARNING: this offset says the microphone clips at {clip:.0f} dB SPL, "
+        "which no\nmeasurement microphone does -- a UMIK-1 is good to about "
+        "120 dB. The offset is\nalmost certainly too small by around 30 dB.\n"
+        "A cal file's Sens Factor is a small per-unit trim, not the absolute "
+        "sensitivity;\nit does not by itself convert dBFS to SPL. Measure the "
+        "offset with\n`noise-monitor calibrate` and an acoustic calibrator, or "
+        "set calibration.spl_offset_db\nby hand. See the README."
+    )
 
 
 def resolve_spl_offset(

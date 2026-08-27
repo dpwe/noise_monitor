@@ -97,23 +97,40 @@ SPL offset       : +94.62 dB  (Sens Factor -0.6162 dB, serial 7005701)
 
 This is the one setting that will silently make every reading wrong.
 
-The `Sens Factor` in the calibration file is defined by miniDSP (and REW) as
-*the dBFS the mic produces from a 94 dB SPL calibrator **with the input volume
-at maximum***. The UMIK-1's USB gain control is a real gain, so:
+### The Sens Factor is not the whole offset
+
+REW documents the `Sens Factor` as *the dBFS the mic produces from a 94 dB SPL
+calibrator **with the input volume at maximum***, which reads as:
 
 ```
-dB SPL = dBFS_rms + (94 - sens_factor) + input_gain_db
+dB SPL = dBFS_rms + (94 - sens_factor) + input_gain_db     # INCOMPLETE
 ```
 
-where `input_gain_db` is how far the capture gain sits **below** maximum.
+**Taken literally that is about 30 dB too small.** It puts a UMIK-1's overload
+point near 92 dB SPL — a loud conversation — when the hardware is good to
+around 120 dB. Every Sens Factor in the wild is a small number near zero
+(−1.055, −0.667, REW's own example 1.2345); real absolute sensitivities would
+scatter around −30 dBFS. The figure is a per-unit **trim** on a nominal
+sensitivity for the model, which REW knows internally and does not appear to
+publish.
 
-Two consequences:
+So `check` and `run` print a warning, and the UI status line turns red, whenever
+the resulting offset implies an overload point below 100 dB SPL. If you see it,
+the offset is wrong — do not work around it by putting the missing ~30 dB into
+`input_gain_db`, which means something else (see below) and will then disagree
+with what `noise-monitor gain` reports. Measure the offset properly and put it
+in `spl_offset_db`:
 
-1. **At maximum gain the mic clips at roughly 92 dB SPL.** That is fine for
-   typical environmental monitoring (30–85 dB(A)) and gives the best noise
-   floor, but it will overload on anything loud. `check` warns you about this,
-   and the UI shows a red `CLIP` indicator when it happens.
-2. **If you lower the gain for more headroom, you must tell the app.** On Linux:
+```toml
+[calibration]
+spl_offset_db = 125.06   # measured, wins over the Sens Factor entirely
+```
+
+### Capture gain
+
+`input_gain_db` is for attenuation **you** have dialled in — how far the capture
+gain sits below maximum — and nothing else. If you lower the gain for more
+headroom, you must tell the app. On Linux:
 
    ```bash
    noise-monitor gain
@@ -133,7 +150,8 @@ Two consequences:
 
    `noise-monitor gain` scrapes `amixer` output, which is not a stable
    interface. Cross-check it once by hand against `amixer -c 1 contents` — the
-   command prints a warning if its two sources of truth disagree.
+   command prints a warning if its two sources of truth disagree. It handles
+   both TLV forms ALSA prints, `dBscale` and the `dBminmax` a real UMIK-1 uses.
 
 ### The reliable way: an acoustic calibrator
 
@@ -362,8 +380,8 @@ happened. `save_history = false`, or `--no-history`, turns the whole thing off.
   verification. The chain is built to IEC 61672 definitions and tested against
   the standard's tolerance table, but a UMIK-1 on a Pi is not a certified
   instrument.
-- **`noise-monitor gain` is untested against real hardware.** The ALSA parser is
-  covered by unit tests against representative `amixer` output, but nobody has
-  yet run it on a Pi with a UMIK-1 attached — verify it once by hand.
+- **A cal file alone does not give absolute SPL.** See "The Sens Factor is not
+  the whole offset" above. Use an acoustic calibrator, or expect to be about
+  30 dB out.
 - **Outdoors you need a windscreen.** Wind noise is mostly infrasonic; it will
   not move dB(A) much but it will eat your headroom and clip.

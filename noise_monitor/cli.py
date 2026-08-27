@@ -8,7 +8,13 @@ from pathlib import Path
 
 import numpy as np
 
-from .calibration import REFERENCE_CALIBRATOR_SPL, parse_cal_file, resolve_spl_offset
+from .calibration import (
+    REFERENCE_CALIBRATOR_SPL,
+    clipping_spl,
+    headroom_warning,
+    parse_cal_file,
+    resolve_spl_offset,
+)
 from .capture import (
     ArraySource,
     FileSource,
@@ -235,16 +241,11 @@ def cmd_check(args) -> int:
         return 0
 
     print(f"  0 dBFS RMS reads {offset:.1f} dB SPL")
-    clip_spl = offset - 3.01
-    print(f"  clipping level   : {clip_spl:.1f} dB SPL (a full-scale sine)")
-    if clip_spl < 100.0:
-        print(
-            f"\n  NOTE: {clip_spl:.0f} dB SPL of headroom assumes the capture gain is at "
-            "the\n  calibration file's reference (maximum). If you expect louder "
-            "sounds than\n  that, lower the capture gain and set "
-            "calibration.input_gain_db to match --\n  `noise-monitor gain` will "
-            "work it out for you on Linux."
-        )
+    print(f"  clipping level   : {clipping_spl(offset):.1f} dB SPL (a full-scale sine)")
+    warning = headroom_warning(offset)
+    if warning is not None:
+        print()
+        print(warning)
     return 0
 
 
@@ -340,6 +341,9 @@ def cmd_run(args) -> int:
     print(f"calibration: {note} (offset {offset:+.2f} dB)")
     if not engine.calibrated:
         print("WARNING: no absolute reference -- levels shown are dBFS, not dB SPL")
+    warning = headroom_warning(offset)
+    if warning is not None:
+        print(warning)
     if logger is not None:
         print(f"logging every {cfg.logging.interval_s:g} s to {cfg.logging.directory}/")
 

@@ -21,6 +21,7 @@ import numpy as np
 import pyqtgraph as pg
 from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
+from .calibration import clipping_spl
 from .config import Config
 from .engine import MonitorEngine
 
@@ -474,6 +475,15 @@ class MonitorWindow(QtWidgets.QMainWindow):
         if not self.engine.calibrated:
             text += "  |  showing dBFS, NOT absolute SPL"
             self._status_style = "color: #b06000; font-weight: bold;"
+        elif self.engine.headroom_warning is not None:
+            # Long enough to be worth abbreviating here; `check` and `run`
+            # print the whole explanation.
+            clip = clipping_spl(self.engine.analyzer.spl_offset_db)
+            text += (
+                f"  |  CHECK CALIBRATION: this says the mic clips at "
+                f"{clip:.0f} dB SPL"
+            )
+            self._status_style = "color: #b00020; font-weight: bold;"
         self._status_text = text
         self.status_label.setStyleSheet(self._status_style)
         self.status_label.setText(text)

@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from .analysis import Analyzer
-from .calibration import MicCalibration
+from .calibration import MicCalibration, clipping_spl, headroom_warning
 from .capture import AudioSource
 from .config import Config
 from .logsink import CsvLogger
@@ -78,6 +78,11 @@ class MonitorEngine:
     @property
     def calibration_note(self) -> str:
         return self.analyzer.calibration_note
+
+    @property
+    def headroom_warning(self) -> str | None:
+        """Set when the SPL offset implies an impossible overload point."""
+        return headroom_warning(self.analyzer.spl_offset_db)
 
     @property
     def band_centers(self) -> np.ndarray:

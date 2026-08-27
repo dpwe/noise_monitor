@@ -3,9 +3,12 @@ import pytest
 from scipy.signal import freqz
 
 from noise_monitor.calibration import (
+    MIN_PLAUSIBLE_CLIP_SPL,
     REFERENCE_CALIBRATOR_SPL,
     bin_correction_db,
+    clipping_spl,
     design_correction_fir,
+    headroom_warning,
     parse_cal_file,
     resolve_spl_offset,
 )
@@ -124,3 +127,39 @@ def test_correction_fir_respects_the_boost_limit(cal_file):
     taps = design_correction_fir(cal, fs, numtaps=1023, max_boost_db=3.0)
     _, h = freqz(taps, worN=2 * np.pi * np.geomspace(20, 20000, 200) / fs)
     assert np.max(20 * np.log10(np.abs(h))) < 3.0 + 0.5
+
+
+# --- the headroom sanity check ----------------------------------------
+# A Sens-Factor-only offset makes a measurement mic look like it overloads
+# at conversation level. That is the cheapest, loudest symptom of an offset
+# roughly 30 dB too small, so the tools check for it.
+
+def test_clipping_level_is_the_offset_less_a_full_scale_sine():
+    assert clipping_spl(125.06) == pytest.approx(122.05, abs=0.01)
+
+
+def test_an_impossible_overload_point_is_flagged():
+    """94 - (-1.055) with no nominal sensitivity: clips at 92 dB SPL."""
+    warning = headroom_warning(95.06)
+    assert warning is not None
+    assert "92 dB SPL" in warning
+    assert "30 dB" in warning
+    assert "calibrate" in warning
+
+
+def test_a_plausible_offset_is_not_flagged():
+    """The same microphone with its nominal sensitivity restored."""
+    assert headroom_warning(125.06) is None
+
+
+def test_the_threshold_sits_between_the_two():
+    """The offset that puts clipping exactly on the threshold is MIN + 3.01,
+    because a full-scale sine is 3.01 dB below the offset, not above it."""
+    boundary = MIN_PLAUSIBLE_CLIP_SPL + 3.01
+    assert headroom_warning(boundary - 0.1) is not None
+    assert headroom_warning(boundary + 0.1) is None
+
+
+def test_an_uncalibrated_zero_offset_is_flagged_too():
+    """dBFS reported as SPL is the most wrong of all."""
+    assert headroom_warning(0.0) is not None
