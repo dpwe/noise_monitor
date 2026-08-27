@@ -98,6 +98,11 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--screenshot-dir", type=Path, help="where the S key writes PNGs"
     )
+    p.add_argument("--history-file", type=Path, help="long-term panel history store")
+    p.add_argument(
+        "--no-history", action="store_true",
+        help="do not keep the long-term panel across restarts",
+    )
     p.add_argument("--log-interval", type=float, help="seconds per logged row")
     p.add_argument("--no-log", action="store_true", help="disable CSV logging")
     p.add_argument("--fullscreen", action="store_true")
@@ -147,6 +152,10 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         cfg.logging.directory = args.log_dir
     if a("screenshot_dir") is not None:
         cfg.ui.screenshot_dir = args.screenshot_dir
+    if a("history_file") is not None:
+        cfg.ui.history_file = args.history_file
+    if a("no_history"):
+        cfg.ui.save_history = False
     if a("log_interval") is not None:
         cfg.logging.interval_s = args.log_interval
     if a("no_log"):

@@ -69,3 +69,8 @@ colormap = "viridis"
 refresh_hz = 30.0
 fullscreen = false
 screenshot_dir = "screenshots"   # where the S key writes PNGs
+
+# Keep the long-term panel's columns across a restart, so the day so far is
+# still there after a reboot. Time the monitor was not running stays a gap.
+save_history = true
+history_file = "history/long_term.npz"

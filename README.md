@@ -203,6 +203,7 @@ noise-monitor run --weighting C --time-weighting slow
 noise-monitor run --fullscreen --history 60
 noise-monitor run --long-span 12 --long-column 1    # 12 h panel, 1 min columns
 noise-monitor run --average 1                       # livelier readout
+noise-monitor run --no-history                      # start the day panel empty
 noise-monitor run --headless 3600             # log for an hour, no GUI
 noise-monitor devices                         # list inputs
 ```
@@ -309,7 +310,7 @@ narrower than one FFT bin, so they show a proportional share of it; raise
 `nfft` for more low-frequency resolution, at the cost of time resolution.
 `scale = "density"` divides by bandwidth and renders broadband noise flat.
 
-**Long-term average.** The bottom panel averages every `ui.long_column_s` of
+**Long-term average.** The bottom panel averages each `ui.long_column_s` of
 live columns into one, in the **power** domain. Averaging decibels instead
 would badly under-report a day shaped by short loud events: the mean of 40 and
 80 dB is 60 dB, but their energy mean — the thing a person actually hears the
@@ -318,6 +319,26 @@ trace over it is the broadband Leq over the same window. It is stored as a
 fixed array scrolled in place, so 24 hours costs the same as 24 seconds
 (480 columns × 256 bands ≈ 0.5 MB), and the column still filling is shown at
 the right-hand edge so the newest minutes are not blank.
+
+**History across restarts.** Columns sit on absolute wall-clock slots — column
+N covers `[N*column_s, (N+1)*column_s)` in Unix time — rather than being
+counted off in FFT hops. That is what makes them resumable: each completed
+column is written to `ui.history_file`, and a relaunch drops back onto the same
+grid, so stored columns land at the times they actually happened. Hours the
+monitor was not running stay empty rather than being quietly closed up — the
+image goes to background and the level trace breaks, instead of drawing a
+straight line across the outage.
+
+The store is a plain `.npz`, about half a megabyte, written when a column
+completes (every three minutes) and again at shutdown, so a power cut costs at
+most the column in progress. It is written to a temporary and renamed, because
+a half-written file must not replace a good one. The image is stored as
+float16: 0.06 dB is far finer than the colour scale can show and it halves what
+a 24/7 monitor writes to its SD card. A store written under a different column
+length or band count describes a different picture, so it is refused rather
+than stretched to fit, and a missing, truncated or alien file just means an
+empty panel — never a failure to start. The status line says which of these
+happened. `save_history = false`, or `--no-history`, turns the whole thing off.
 
 ## Layout
 

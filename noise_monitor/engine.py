@@ -5,6 +5,7 @@ from __future__ import annotations
 import threading
 from collections import deque
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -13,7 +14,7 @@ from .calibration import MicCalibration
 from .capture import AudioSource
 from .config import Config
 from .logsink import CsvLogger
-from .longterm import LongTermAverage, LongTermSnapshot
+from .longterm import LongTermAverage, LongTermSnapshot, load_history, save_history
 from .metrics import IntervalStats
 
 
@@ -59,6 +60,13 @@ class MonitorEngine:
         # The long-term panel is fed here rather than from drain(), so it keeps
         # accumulating whatever the UI does -- including not existing at all.
         self._long_term = LongTermAverage.from_config(config)
+        self._history_path = (
+            Path(config.ui.history_file).expanduser() if config.ui.save_history else None
+        )
+        if self._history_path is None:
+            self.history_note = "history not kept"
+        else:
+            self.history_note = self._long_term.restore(load_history(self._history_path))
         self._state = EngineState()
         self._clip_hold_blocks = 0
 
@@ -85,6 +93,25 @@ class MonitorEngine:
         with self._lock:
             return self._long_term.snapshot()
 
+    def write_history(self) -> None:
+        """Persist the long-term columns, if that is switched on.
+
+        The copy is taken under the lock and written outside it: a plain npz
+        of a day's columns is about a millisecond, but the DSP thread should
+        not be holding the lock for even that.
+        """
+        if self._history_path is None:
+            return
+        with self._lock:
+            state = self._long_term.state()
+        if state is None:
+            return
+        try:
+            save_history(self._history_path, state)
+        except OSError as exc:
+            # A full or read-only disk must not take the meter down with it.
+            self.history_note = f"history not saved: {exc}"
+
     def start(self) -> None:
         self._stop.clear()
         self.source.start()
@@ -107,6 +134,7 @@ class MonitorEngine:
         if self._thread is not None:
             self._thread.join(timeout=3.0)
             self._thread = None
+        self.write_history()  # keep the part-finished column across the restart
         self.source.stop()
         if self.logger is not None:
             self.logger.close()
@@ -156,6 +184,7 @@ class MonitorEngine:
                 elif self._clip_hold_blocks > 0:
                     self._clip_hold_blocks -= 1
 
+                closed = False
                 with self._lock:
                     self._columns.extend(frame.columns)
                     for column in frame.columns:
@@ -163,7 +192,7 @@ class MonitorEngine:
                         # smooth someone likes the readout must not change what
                         # the day-long history records. Power-averaging over a
                         # column swamps the 125 ms detector either way.
-                        self._long_term.add(column, frame.level_db)
+                        closed |= self._long_term.add(column, frame.level_db)
                     self._state.level_db = frame.level_db
                     self._state.leq_avg = frame.leq_avg
                     self._state.clipped = frame.clipped
@@ -171,6 +200,9 @@ class MonitorEngine:
                     self._state.overflows = getattr(self.source, "overflows", 0)
                     if intervals:
                         self._state.last_interval = intervals[-1]
+
+                if closed:  # a column was banked; there is something new to keep
+                    self.write_history()
         except Exception as exc:  # surface it in the UI rather than dying silently
             with self._lock:
                 self._state.error = f"{type(exc).__name__}: {exc}"

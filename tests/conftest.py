@@ -1,5 +1,21 @@
+import os
+
 import numpy as np
 import pytest
+
+
+@pytest.fixture(autouse=True, scope="session")
+def _run_outside_the_repo(tmp_path_factory):
+    """Run the suite from a scratch directory.
+
+    Several config defaults are relative paths -- `logs/`, `history/`,
+    `screenshots/` -- so anything that writes one lands in the working
+    directory. That should never be the source tree.
+    """
+    previous = os.getcwd()
+    os.chdir(tmp_path_factory.mktemp("cwd"))
+    yield
+    os.chdir(previous)
 
 # A file in exactly the shape miniDSP ships: bare-leading-dot sensitivity,
 # tab-separated pairs, log-spaced from 10 Hz to 20 kHz, 0 dB at 1 kHz.

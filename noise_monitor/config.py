@@ -101,6 +101,11 @@ class UIConfig:
     fullscreen: bool = False
     #: Where the S key writes PNGs of the window.
     screenshot_dir: Path = Path("screenshots")
+    #: Keep the long-term panel's columns across a restart. Off means it
+    #: starts empty every launch.
+    save_history: bool = True
+    #: Where those columns are kept.
+    history_file: Path = Path("history/long_term.npz")
 
 
 @dataclass

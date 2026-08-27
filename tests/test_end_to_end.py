@@ -24,6 +24,7 @@ def make_config(**overrides) -> Config:
     cfg.analysis.nfft = 2048
     cfg.analysis.hop = 512
     cfg.logging.enabled = False
+    cfg.ui.save_history = False  # the history tests below opt back in
     for path, value in overrides.items():
         section, _, key = path.partition(".")
         setattr(getattr(cfg, section), key, value)
@@ -194,6 +195,50 @@ def test_engine_runs_and_logs(tmp_path, cal_file):
     # -30 dBFS pink noise through A-weighting, plus the ~94.6 dB offset.
     leq = float(rows[-1]["LAeq"])
     assert 40.0 < leq < 90.0, leq
+
+
+def test_the_long_term_history_survives_a_relaunch(tmp_path):
+    """The whole point: a restart picks the panel up where it left off."""
+    store = tmp_path / "history" / "long_term.npz"
+
+    def session(seconds):
+        cfg = make_config()
+        cfg.ui.save_history = True
+        cfg.ui.history_file = store
+        cfg.ui.long_column_s = 1.0
+        cfg.ui.long_span_s = 60.0
+        fs = cfg.audio.samplerate
+        signal = synthetic_signal(fs, duration_s=2.0, target_dbfs=-30.0)
+        source = ArraySource(signal, fs, cfg.audio.blocksize, realtime=True, loop=True)
+        engine = MonitorEngine(cfg, source, cal=None)
+        note = engine.history_note
+        engine.start()
+        time.sleep(seconds)
+        engine.stop()
+        return note, engine
+
+    first_note, first = session(2.5)
+    assert "no stored history" in first_note
+    recorded = int(np.isfinite(first.long_term().levels).sum())
+    assert recorded >= 1, "the first session should have banked a column"
+    assert store.exists()
+
+    second_note, second = session(1.5)
+    assert "restored" in second_note
+    kept = int(np.isfinite(second.long_term().levels).sum())
+    assert kept >= recorded, "the second session should build on the first"
+
+
+def test_history_is_not_written_when_it_is_switched_off(tmp_path):
+    cfg = make_config()
+    cfg.ui.save_history = False
+    cfg.ui.history_file = tmp_path / "long_term.npz"
+    source = ArraySource(np.zeros(4096), cfg.audio.samplerate, cfg.audio.blocksize)
+    engine = MonitorEngine(cfg, source, cal=None)
+    engine.start()
+    engine.stop()
+    assert not (tmp_path / "long_term.npz").exists()
+    assert "not kept" in engine.history_note
 
 
 def test_engine_rejects_a_samplerate_mismatch():

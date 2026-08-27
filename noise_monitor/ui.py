@@ -467,7 +467,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
     def _build_status(self) -> QtWidgets.QLabel:
         self.status_label = QtWidgets.QLabel()
         note = self.engine.calibration_note
-        text = f"{self.engine.source.description}  |  calibration: {note}"
+        text = (
+            f"{self.engine.source.description}  |  calibration: {note}"
+            f"  |  {self.engine.history_note}"
+        )
         if not self.engine.calibrated:
             text += "  |  showing dBFS, NOT absolute SPL"
             self._status_style = "color: #b06000; font-weight: bold;"
@@ -547,12 +550,17 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.long_image.setImage(
             snapshot.image, autoLevels=False, levels=(ui.db_min, ui.db_max)
         )
-        # The right-hand edge of the image is now, so the clock labels move
-        # with every redraw even though the tick positions do not.
-        self.clock_axis.set_now(time.time())
-        if snapshot.n_valid:
-            hours_ago = snapshot.ages_s() / 3600.0
-            self.long_level_curve.setData(-hours_ago, snapshot.levels[-snapshot.n_valid :])
+        # The right-hand edge is the end of the newest slot, so the clock
+        # labels move with the data rather than with the redraw.
+        end = snapshot.end_time
+        self.clock_axis.set_now(time.time() if end is None else end)
+        if snapshot.has_levels:
+            # connect="finite" breaks the trace at the NaNs, so an hour the
+            # monitor was down reads as a gap and not as a straight line
+            # drawn across it.
+            self.long_level_curve.setData(
+                snapshot.centers_s() / 3600.0, snapshot.levels, connect="finite"
+            )
 
     def _update_status(self, state) -> None:
         """Keep lost audio visible somewhere now that the stats overlay is gone.

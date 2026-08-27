@@ -236,6 +236,7 @@ def window(qapp, tmp_path):
     cfg = Config()
     cfg.logging.enabled = False
     cfg.ui.screenshot_dir = tmp_path / "shots"
+    cfg.ui.save_history = False
     cfg.ui.long_span_s = 3600.0  # 20 columns, not 480
     source = ArraySource(np.zeros(1024), cfg.audio.samplerate, cfg.audio.blocksize)
     win = MonitorWindow(MonitorEngine(cfg, source, cal=None), cfg)
