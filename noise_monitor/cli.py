@@ -62,6 +62,19 @@ def build_parser() -> argparse.ArgumentParser:
         "gain", help="read the ALSA capture gain and derive input_gain_db (Linux)"
     )
 
+    plot = sub.add_parser("plot", help="plot the logged level history")
+    plot.add_argument("-c", "--config", type=Path, help="TOML config file")
+    plot.add_argument(
+        "paths", nargs="*", type=Path,
+        help="CSV files to plot (default: everything in the log directory)",
+    )
+    plot.add_argument("--log-dir", type=Path, help="directory of CSV logs")
+    plot.add_argument(
+        "--metrics", default="Leq",
+        help="comma-separated columns, e.g. Leq,L90,Lmax (default Leq)",
+    )
+    plot.add_argument("--days", type=int, help="only the newest N daily files")
+
     _add_run_args(parser)  # allow `noise-monitor --synthetic` with no subcommand
     return parser
 
@@ -325,6 +338,35 @@ def _tone_level_dbfs(signal: np.ndarray, samplerate: int, frequency: float) -> f
     return 10 * np.log10(max(total / frames, 1e-20))
 
 
+def cmd_plot(args) -> int:
+    from .logplot import find_logs, load_logs, plot_logs
+
+    cfg = apply_overrides(Config.load(args.config), args)
+    if args.paths:
+        paths = list(args.paths)
+    else:
+        paths = find_logs(cfg.logging.directory, days=args.days)
+        if not paths:
+            raise SystemExit(f"no log files in {cfg.logging.directory}/")
+
+    series = load_logs(paths)
+    wanted = [m.strip() for m in args.metrics.split(",") if m.strip()]
+    metrics = []
+    for name in wanted:
+        resolved = series.resolve(name)
+        if resolved is None:
+            available = ", ".join(sorted(series.level_columns)) or "none"
+            raise SystemExit(f"no column {name!r} in the logs; available: {available}")
+        metrics.append(resolved)
+
+    print(f"{len(series)} rows from {len(series.sources)} file(s), "
+          f"{series.interval_s:g} s apart")
+    try:
+        return plot_logs(series, metrics)
+    except ImportError as exc:
+        raise SystemExit(f"plotting needs pyqtgraph and a Qt binding ({exc})")
+
+
 def cmd_run(args) -> int:
     cfg = apply_overrides(Config.load(args.config), args)
     cal = load_calibration(cfg)
@@ -396,6 +438,7 @@ def main(argv: list[str] | None = None) -> int:
         "calibrate": cmd_calibrate,
         "check": cmd_check,
         "gain": cmd_gain,
+        "plot": cmd_plot,
     }
     try:
         return handlers[command](args)

@@ -228,6 +228,35 @@ noise-monitor devices                         # list inputs
 
 ---
 
+## Plotting the logs
+
+```bash
+noise-monitor plot                      # everything in the log directory
+noise-monitor plot --days 7             # the last week
+noise-monitor plot --metrics Leq,L90    # more than one series
+noise-monitor plot logs/noise-20260821.csv
+```
+
+Opens a window with the logged level against a calendar axis. **Drag to pan,
+wheel to zoom, `A` to fit everything again, `Q` to quit.** A readout above the
+plot says exactly what is on screen and how much of it, which the axis alone
+cannot — `DateAxisItem` prints the month only where a month boundary falls in
+view, so a week inside one month would otherwise be labelled with bare day
+numbers.
+
+`--metrics` tolerates the weighting letter: `Leq` finds `LAeq` in an A-weighted
+log and `LCeq` in a C-weighted one. The first metric listed is drawn on top,
+since with dense data a later curve simply hides an earlier one.
+
+Two details that matter at this size. A year of ten-second rows is about three
+million points, so curves are downsampled in **peak** mode — averaging would
+flatten exactly the short loud events a noise log exists to record. And time
+the monitor was not running is left as a gap rather than joined, for the same
+reason the long-term panel does it: a straight line across an outage is a
+measurement nobody made.
+
+---
+
 ## The CSV log
 
 One row per `logging.interval_s`, in `logs/noise-YYYYMMDD.csv`:
@@ -373,6 +402,7 @@ happened. `save_history = false`, or `--no-history`, turns the whole thing off.
 | `ui.py` | PyQtGraph window |
 | `alsa.py` | Capture gain readback (Linux) |
 | `logsink.py` | CSV writer |
+| `logplot.py` | Reading the logs back, and the calendar-axis plot |
 
 ## Caveats
 

@@ -286,3 +286,60 @@ def test_the_status_line_goes_back_to_normal_afterwards(window):
     assert window.status_label.text() != original
     window._restore_status()
     assert window.status_label.text() == original
+
+
+# ----------------------------------------------------------------------
+# The log plot window.
+
+
+@pytest.fixture
+def log_window(qapp, tmp_path):
+    import csv
+
+    from noise_monitor.logplot import build_window, load_logs
+
+    path = tmp_path / "noise-20260821.csv"
+    fields = ["time", "timestamp", "duration_s", "LAeq", "LA90"]
+    with open(path, "w", newline="") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fields)
+        writer.writeheader()
+        for i in range(200):
+            writer.writerow({"time": "x", "timestamp": 1_800_000_000.0 + 10 * i,
+                             "duration_s": 10.0, "LAeq": 40 + i % 7, "LA90": 35.0})
+    series = load_logs(path)
+    window = build_window(series, ["LAeq", "LA90"])
+    window.resize(800, 400)
+    window.show()
+    yield window
+    window.close()
+
+
+def test_the_log_window_builds(log_window):
+    assert log_window.plot is not None
+    assert "200 rows" in log_window.windowTitle()
+
+
+def test_the_range_readout_says_what_is_on_screen(log_window):
+    import datetime as dt
+
+    text = log_window.range_label.text
+    # Derived, not hard-coded: the fixture's epoch is whatever it is.
+    day = dt.datetime.fromtimestamp(1_800_000_000.0).strftime("%d %b %Y")
+    assert day in text
+    # 200 rows ten seconds apart is a bit over half an hour.
+    assert "minutes" in text
+
+
+def test_the_readout_follows_a_zoom(log_window, qapp):
+    before = log_window.range_label.text
+    start, end = log_window.plot.viewRange()[0]
+    log_window.plot.setXRange(end - 120, end, padding=0)
+    qapp.processEvents()
+    assert log_window.range_label.text != before
+    assert "minutes" in log_window.range_label.text
+
+
+def test_the_first_metric_is_drawn_on_top(log_window):
+    """A later dense curve simply hides an earlier one."""
+    curves = [i for i in log_window.plot.listDataItems()]
+    assert curves[0].zValue() > curves[1].zValue()
