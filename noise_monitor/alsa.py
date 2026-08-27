@@ -31,13 +31,21 @@ import sys
 from dataclasses import dataclass
 
 # "numid=2,iface=MIXER,name='Mic Capture Volume'"
-_NUMID_RE = re.compile(r"numid=(\d+),iface=MIXER,name='([^']*)'")
+# Any iface, not just MIXER: an unmatched header does not start a new control,
+# so the following control's min/max would be read into the previous one. A
+# real UMIK-1 lists an iface=PCM control after the mixer ones, so this is not
+# hypothetical.
+_NUMID_RE = re.compile(r"numid=(\d+),iface=(\w+),name='([^']*)'")
 # "  ; type=INTEGER,access=rw---R--,values=1,min=0,max=24,step=0"
 _TYPE_RE = re.compile(r"type=(\w+).*?min=(-?\d+),max=(-?\d+)")
 # "  : values=18"
 _VALUES_RE = re.compile(r":\s*values=(-?\d+)")
 # "  | dBscale-min=0.00dB,step=1.00dB,mute=0"
 _DBSCALE_RE = re.compile(r"dBscale-min=(-?\d+\.?\d*)dB,step=(-?\d+\.?\d*)dB")
+# "  | dBminmax-min=-63.50dB,max=0.00dB" -- the other TLV form, which real
+# UMIK-1s use: dB runs linearly from min to max across the raw range, with no
+# per-step figure to read.
+_DBMINMAX_RE = re.compile(r"dBminmax-min=(-?\d+\.?\d*)dB,max=(-?\d+\.?\d*)dB")
 # "  Mono: Capture 18 [75%] [18.00dB] [on]"
 _SGET_DB_RE = re.compile(r"\[(-?\d+\.\d+)dB\]")
 
@@ -95,7 +103,11 @@ def parse_contents(text: str) -> list[dict]:
     for line in text.splitlines():
         header = _NUMID_RE.search(line)
         if header:
-            current = {"numid": int(header.group(1)), "name": header.group(2)}
+            current = {
+                "numid": int(header.group(1)),
+                "iface": header.group(2),
+                "name": header.group(3),
+            }
             controls.append(current)
             continue
         if current is None:
@@ -109,6 +121,9 @@ def parse_contents(text: str) -> list[dict]:
         elif m := _DBSCALE_RE.search(line):
             current["db_min"] = float(m.group(1))
             current["db_step"] = float(m.group(2))
+        elif m := _DBMINMAX_RE.search(line):
+            current["db_min"] = float(m.group(1))
+            current["db_max"] = float(m.group(2))
     return controls
 
 
@@ -122,20 +137,40 @@ def read_capture_gain(card: str) -> CaptureGain | None:
         name = control.get("name", "")
         if "capture volume" not in name.lower():
             continue
-        needed = ("value", "max", "db_min", "db_step")
-        if not all(k in control for k in needed):
+        if not all(k in control for k in ("value", "max", "min", "db_min")):
             continue
         if control["max"] == control["min"]:
             continue
-        db_min, step = control["db_min"], control["db_step"]
+        levels = _db_levels(control)
+        if levels is None:
+            continue
+        current_db, max_db = levels
         return CaptureGain(
             card=str(card),
             control=name,
-            current_db=db_min + control["value"] * step,
-            max_db=db_min + control["max"] * step,
+            current_db=current_db,
+            max_db=max_db,
             current_raw=control["value"],
             max_raw=control["max"],
         )
+    return None
+
+
+def _db_levels(control: dict) -> tuple[float, float] | None:
+    """(current, maximum) gain in dB, from whichever TLV form ALSA printed.
+
+    `dBscale` gives a per-step size; `dBminmax` gives only the endpoints, with
+    dB running linearly across the raw range between them.
+    """
+    db_min = control["db_min"]
+    raw, raw_min, raw_max = control["value"], control["min"], control["max"]
+    if "db_step" in control:
+        step = control["db_step"]
+        return db_min + raw * step, db_min + raw_max * step
+    if "db_max" in control:
+        db_max = control["db_max"]
+        span = (db_max - db_min) / (raw_max - raw_min)
+        return db_min + (raw - raw_min) * span, db_max
     return None
 
 
