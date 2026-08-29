@@ -69,6 +69,7 @@ colormap = "viridis"
 refresh_hz = 30.0
 fullscreen = false
 screenshot_dir = "screenshots"   # where the S key writes PNGs
+daily_screenshot = true          # also save one automatically at midnight
 
 # Keep the long-term panel's columns across a restart, so the day so far is
 # still there after a reboot. Time the monitor was not running stays a gap.

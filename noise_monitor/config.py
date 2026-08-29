@@ -101,6 +101,9 @@ class UIConfig:
     fullscreen: bool = False
     #: Where the S key writes PNGs of the window.
     screenshot_dir: Path = Path("screenshots")
+    #: Also save one automatically as each day ends, capturing exactly the day
+    #: the long-term panel is showing. About 400 kB a day.
+    daily_screenshot: bool = True
     #: Keep the long-term panel's columns across a restart. Off means it
     #: starts empty every launch.
     save_history: bool = True

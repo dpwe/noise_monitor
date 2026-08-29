@@ -97,6 +97,10 @@ class LogFreqAxis(pg.AxisItem):
         return out
 
 
+def _local_day() -> str:
+    return time.strftime("%Y%m%d")
+
+
 def _duration_label(seconds: float) -> str:
     """A compact name for an averaging window: '1s', '3min', '24h'.
 
@@ -217,6 +221,10 @@ class MonitorWindow(QtWidgets.QMainWindow):
     READOUT_POINT_SIZES = (22, 8, 7)
     #: How long a transient status message (a saved screenshot) stays up.
     STATUS_FLASH_MS = 5000
+    #: How often to notice the date has changed, for the daily screenshot.
+    #: Ten seconds puts it within ten seconds of midnight, which is close
+    #: enough for a picture of a whole day.
+    DAY_CHECK_MS = 10_000
     #: Tallest the colour bar gets. It is a legend, not a plot; at full window
     #: height it dominated a column it shares with nothing else.
     COLORBAR_MAX_HEIGHT_PX = 240
@@ -519,6 +527,12 @@ class MonitorWindow(QtWidgets.QMainWindow):
         self.long_timer.start(max(100, int(1000 * self.config.ui.long_refresh_s)))
         self._refresh_long_term()
 
+        self._current_day = _local_day()
+        self.day_timer = QtCore.QTimer(self)
+        self.day_timer.timeout.connect(self.check_day_rollover)
+        if self.config.ui.daily_screenshot:
+            self.day_timer.start(self.DAY_CHECK_MS)
+
     def _refresh(self) -> None:
         columns, state = self.engine.drain()
 
@@ -600,10 +614,26 @@ class MonitorWindow(QtWidgets.QMainWindow):
         else:
             super().keyPressEvent(event)
 
-    def save_screenshot(self) -> Path | None:
+    def check_day_rollover(self) -> Path | None:
+        """Save a screenshot as each day ends, showing exactly that day.
+
+        The date is polled rather than a single wake-up being scheduled for
+        midnight: a monitor that runs for months meets DST changes, NTP steps
+        and suspends, and any one of those defeats a scheduled wake-up while
+        leaving a poll to notice on its next tick.
+        """
+        today = _local_day()
+        if today == self._current_day:
+            return None
+        ended, self._current_day = self._current_day, today
+        # Named for the day it covers, not the minute it was taken, so a
+        # restart cannot produce two pictures of the same day.
+        return self.save_screenshot(name=f"noise-monitor-daily-{ended}.png")
+
+    def save_screenshot(self, name: str | None = None) -> Path | None:
         """Write a PNG of the window and report where it went, or why not."""
         directory = Path(self.config.ui.screenshot_dir).expanduser()
-        path = directory / time.strftime("noise-monitor-%Y%m%d-%H%M%S.png")
+        path = directory / (name or time.strftime("noise-monitor-%Y%m%d-%H%M%S.png"))
         try:
             directory.mkdir(parents=True, exist_ok=True)
             # The button is chrome, not measurement; keep it out of the image.
@@ -624,6 +654,7 @@ class MonitorWindow(QtWidgets.QMainWindow):
     def closeEvent(self, event) -> None:
         self.timer.stop()
         self.long_timer.stop()
+        self.day_timer.stop()
         self.engine.stop()
         super().closeEvent(event)
 

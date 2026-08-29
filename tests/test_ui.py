@@ -1,6 +1,7 @@
 """Axis label mapping. Skipped unless a Qt binding is installed."""
 
 import os
+import re
 import time
 from pathlib import Path
 
@@ -343,3 +344,69 @@ def test_the_first_metric_is_drawn_on_top(log_window):
     """A later dense curve simply hides an earlier one."""
     curves = [i for i in log_window.plot.listDataItems()]
     assert curves[0].zValue() > curves[1].zValue()
+
+
+# ----------------------------------------------------------------------
+# The daily screenshot.
+
+
+def test_nothing_is_saved_while_the_day_is_the_same(window):
+    assert window.check_day_rollover() is None
+    assert not list(Path(window.config.ui.screenshot_dir).glob("*.png"))
+
+
+def test_the_day_ending_triggers_a_screenshot(window):
+    window._current_day = "20260826"  # pretend we have been up since yesterday
+    path = window.check_day_rollover()
+    assert path is not None and path.exists()
+    # Named for the day it covers, not the day it was written.
+    assert path.name == "noise-monitor-daily-20260826.png"
+
+
+def test_it_does_not_fire_twice_for_the_same_day(window):
+    window._current_day = "20260826"
+    first = window.check_day_rollover()
+    assert first is not None
+    assert window.check_day_rollover() is None
+    assert list(Path(window.config.ui.screenshot_dir).glob("*.png")) == [first]
+
+
+def test_the_daily_name_makes_a_restart_idempotent(window):
+    """Two runs on the same day must not leave two pictures of it."""
+    window._current_day = "20260826"
+    window.check_day_rollover()
+    window._current_day = "20260826"  # as if the app had restarted
+    window.check_day_rollover()
+    assert len(list(Path(window.config.ui.screenshot_dir).glob("*.png"))) == 1
+
+
+def test_a_manual_shot_is_named_by_the_minute_not_the_day(window):
+    path = window.save_screenshot()
+    assert path is not None
+    assert "daily" not in path.name
+    assert re.fullmatch(r"noise-monitor-\d{8}-\d{6}\.png", path.name)
+
+
+def test_the_timer_is_not_running_when_it_is_switched_off(qapp, tmp_path):
+    from noise_monitor.capture import ArraySource
+    from noise_monitor.config import Config
+    from noise_monitor.engine import MonitorEngine
+    from noise_monitor.ui import MonitorWindow
+
+    cfg = Config()
+    cfg.logging.enabled = False
+    cfg.ui.save_history = False
+    cfg.ui.daily_screenshot = False
+    cfg.ui.screenshot_dir = tmp_path / "shots"
+    source = ArraySource(np.zeros(1024), cfg.audio.samplerate, cfg.audio.blocksize)
+    win = MonitorWindow(MonitorEngine(cfg, source, cal=None), cfg)
+    try:
+        assert not win.day_timer.isActive()
+    finally:
+        win.timer.stop()
+        win.long_timer.stop()
+        win.close()
+
+
+def test_the_timer_is_running_by_default(window):
+    assert window.day_timer.isActive()

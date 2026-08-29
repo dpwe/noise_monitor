@@ -203,8 +203,17 @@ the wider `db_min`..`db_max` colour scale, and share one colour bar.
 | Key | Action |
 |---|---|
 | `S` | Save a PNG of the window to `ui.screenshot_dir` (or click **Shot**) |
+
 | `F` | Toggle fullscreen |
 | `Q` / `Esc` | Quit |
+
+A screenshot is also saved automatically as each day ends, capturing exactly
+the day the long-term panel is showing, as
+`screenshots/noise-monitor-daily-YYYYMMDD.png`. It is named for the day it
+covers rather than the minute it was taken, so a restart cannot leave two
+pictures of the same day. About 400 kB each, so roughly 150 MB a year — set
+`daily_screenshot = false`, or pass `--no-daily-screenshot`, to turn it off.
+Nothing prunes them.
 
 **Shot**, under the colour bar, does the same thing with the mouse; it hides
 itself for the grab, so it is never in its own screenshot. The status line says

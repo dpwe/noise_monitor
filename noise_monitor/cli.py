@@ -117,6 +117,10 @@ def _add_run_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--screenshot-dir", type=Path, help="where the S key writes PNGs"
     )
+    p.add_argument(
+        "--no-daily-screenshot", action="store_true",
+        help="do not save a screenshot automatically at midnight",
+    )
     p.add_argument("--history-file", type=Path, help="long-term panel history store")
     p.add_argument(
         "--no-history", action="store_true",
@@ -171,6 +175,8 @@ def apply_overrides(cfg: Config, args: argparse.Namespace) -> Config:
         cfg.logging.directory = args.log_dir
     if a("screenshot_dir") is not None:
         cfg.ui.screenshot_dir = args.screenshot_dir
+    if a("no_daily_screenshot"):
+        cfg.ui.daily_screenshot = False
     if a("history_file") is not None:
         cfg.ui.history_file = args.history_file
     if a("no_history"):
