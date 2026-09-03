@@ -31,10 +31,12 @@ Two independent pieces of calibration live in that file:
    UMIK-1's overload point at about 92 dB SPL -- roughly a loud conversation --
    whereas the hardware is good to around 120 dB. Every Sens Factor in the wild
    is a small number near zero (-1.055, -0.667, REW's own example 1.2345);
-   absolute sensitivities would scatter around -30 dBFS instead. The figure is
+   absolute sensitivities would scatter around -31 dBFS instead. The figure is
    evidently a per-unit *trim* on a nominal sensitivity for the model, which REW
-   knows internally and does not appear to publish. Measured against a real
-   UMIK-1 the missing term is about 30 dB.
+   knows internally and does not appear to publish. Measured against one real
+   UMIK-1 with an acoustic calibrator, the missing term is 31.3 dB -- a nominal
+   sensitivity of about -31.3 dBFS at 94 dB SPL. That is a single unit, which
+   is why nothing here hard-codes it.
 
    So this module computes the formula above and ``headroom_warning`` flags the
    result when it implies an impossible overload point. Do not trust a
@@ -63,7 +65,7 @@ from scipy.signal import firwin2
 REFERENCE_CALIBRATOR_SPL = 94.0
 
 #: A measurement microphone appearing to overload below this is not a
-#: microphone problem -- it is an offset roughly 30 dB too small. See the
+#: microphone problem -- it is an offset roughly 31 dB too small. See the
 #: module docstring.
 MIN_PLAUSIBLE_CLIP_SPL = 100.0
 
@@ -226,7 +228,7 @@ def headroom_warning(spl_offset_db: float) -> str | None:
     return (
         f"WARNING: this offset says the microphone clips at {clip:.0f} dB SPL, "
         "which no\nmeasurement microphone does -- a UMIK-1 is good to about "
-        "120 dB. The offset is\nalmost certainly too small by around 30 dB.\n"
+        "120 dB. The offset is\nalmost certainly too small by around 31 dB.\n"
         "A cal file's Sens Factor is a small per-unit trim, not the absolute "
         "sensitivity;\nit does not by itself convert dBFS to SPL. Measure the "
         "offset with\n`noise-monitor calibrate` and an acoustic calibrator, or "

@@ -143,7 +143,7 @@ def test_an_impossible_overload_point_is_flagged():
     warning = headroom_warning(95.06)
     assert warning is not None
     assert "92 dB SPL" in warning
-    assert "30 dB" in warning
+    assert "31 dB" in warning  # the measured shortfall, not the old estimate
     assert "calibrate" in warning
 
 

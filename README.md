@@ -106,17 +106,21 @@ calibrator **with the input volume at maximum***, which reads as:
 dB SPL = dBFS_rms + (94 - sens_factor) + input_gain_db     # INCOMPLETE
 ```
 
-**Taken literally that is about 30 dB too small.** It puts a UMIK-1's overload
+**Taken literally that is about 31 dB too small.** It puts a UMIK-1's overload
 point near 92 dB SPL — a loud conversation — when the hardware is good to
 around 120 dB. Every Sens Factor in the wild is a small number near zero
 (−1.055, −0.667, REW's own example 1.2345); real absolute sensitivities would
-scatter around −30 dBFS. The figure is a per-unit **trim** on a nominal
+scatter around −31 dBFS. The figure is a per-unit **trim** on a nominal
 sensitivity for the model, which REW knows internally and does not appear to
-publish.
+publish. Measured against one UMIK-1 with an acoustic calibrator, the missing
+term is **31.3 dB** — a nominal sensitivity of about −31.3 dBFS at 94 dB SPL.
+That is a single unit, which is why the code does not hard-code it: another
+unit trims differently, and a baked-in constant would hand you a
+plausible-looking wrong number instead of the warning below.
 
 So `check` and `run` print a warning, and the UI status line turns red, whenever
 the resulting offset implies an overload point below 100 dB SPL. If you see it,
-the offset is wrong — do not work around it by putting the missing ~30 dB into
+the offset is wrong — do not work around it by putting the missing ~31 dB into
 `input_gain_db`, which means something else (see below) and will then disagree
 with what `noise-monitor gain` reports. Measure the offset properly and put it
 in `spl_offset_db`:
@@ -421,6 +425,6 @@ happened. `save_history = false`, or `--no-history`, turns the whole thing off.
   instrument.
 - **A cal file alone does not give absolute SPL.** See "The Sens Factor is not
   the whole offset" above. Use an acoustic calibrator, or expect to be about
-  30 dB out.
+  31 dB out.
 - **Outdoors you need a windscreen.** Wind noise is mostly infrasonic; it will
   not move dB(A) much but it will eat your headroom and clip.
