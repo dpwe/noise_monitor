@@ -23,6 +23,12 @@ gui = [
     "pyqtgraph>=0.13",
     "PySide6>=6.5",
 ]
+# fan_analysis/ only -- the long-run analysis scripts, which plot with
+# matplotlib and read saved spectrograms back as images.
+analysis = [
+    "matplotlib>=3.7",
+    "pillow>=10.0",
+]
 dev = [
     "pytest>=7.0",
 ]

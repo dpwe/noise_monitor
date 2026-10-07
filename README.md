@@ -417,6 +417,10 @@ happened. `save_history = false`, or `--no-history`, turns the whole thing off.
 | `logsink.py` | CSV writer |
 | `logplot.py` | Reading the logs back, and the calendar-axis plot |
 
+Plus `fan_analysis/`, a standalone study of one neighbouring rooftop heat pump
+built from a couple of months of this monitor's logs and screenshots — see its
+own README. It is analysis of a particular source, not part of the instrument.
+
 ## Caveats
 
 - **Not a legal-grade sound level meter.** No type approval, no periodic

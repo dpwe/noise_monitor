@@ -12,6 +12,14 @@ logs/
 history/
 screenshots/
 
+# fan_analysis scratch: detect.py dumps these for interactive poking
+fan_analysis/*.npy
+fan_analysis/state.pkl
+
+# ...but its detected episodes are a result, not runtime output, and the logs
+# they came from are not in the repo. The *.csv rule above would swallow it.
+!fan_analysis/fan_events.csv
+
 # Local config -- config.example.toml is the tracked template
 config.toml
 
